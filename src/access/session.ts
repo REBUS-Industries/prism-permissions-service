@@ -36,11 +36,15 @@ export async function exchangePortalSession(
   const creds = getOrbitCreds(orbitTarget);
   let orbitUser = await findOrbitUserByEmail(creds, portalUser.email);
   if (!orbitUser && process.env.ORBIT_AUTO_INVITE === '1') {
-    orbitUser = await inviteOrbitUser(
-      creds,
-      portalUser.email,
-      portalUser.displayName ?? portalUser.email,
-    );
+    try {
+      orbitUser = await inviteOrbitUser(
+        creds,
+        portalUser.email,
+        portalUser.displayName ?? portalUser.email,
+      );
+    } catch {
+      // Invite may fail (missing users:invite scope) — fall through to synthetic id + admin-token mint.
+    }
   }
   const orbitUserId = orbitUser?.id ?? `portal:${portalUser.userId}`;
   if (!orbitUser && process.env.ORBIT_AUTO_INVITE !== '1') {
