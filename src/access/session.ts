@@ -8,7 +8,7 @@ import {
   mintedToken,
   projectPermissionCache,
 } from '../db/schema.js';
-import { findOrbitUserByEmail, inviteOrbitUser } from '../orbit/client.js';
+import { findOrbitUserByEmail, inviteOrbitUser, OrbitClientError } from '../orbit/client.js';
 import { mintScopedOrbitToken } from '../orbit/mint.js';
 import type { PortalAdapter } from '../portal/adapter.js';
 import { buildConnectorManifest, collectEffectiveFunctions } from './manifest.js';
@@ -25,12 +25,38 @@ export class AccessError extends Error {
   }
 }
 
+function toAccessError(err: unknown, fallback: string, status = 500): AccessError {
+  if (err instanceof AccessError) return err;
+  if (err instanceof OrbitClientError) {
+    return new AccessError(err.message, err.status >= 400 && err.status < 600 ? err.status : 502);
+  }
+  if (err instanceof Error) {
+    const message = err.message.trim() || fallback;
+    if (/invalid_grant/i.test(message)) {
+      return new AccessError(
+        'Google OAuth code invalid or expired. Ensure redirectUri matches the connector callback (http://localhost:29364/).',
+        401,
+      );
+    }
+    if (/ORBIT admin credentials missing/i.test(message)) {
+      return new AccessError(message, 503);
+    }
+    return new AccessError(message, status);
+  }
+  return new AccessError(fallback, status);
+}
+
 export async function exchangePortalSession(
   portal: PortalAdapter,
   body: AccessSessionRequest,
 ) {
   const orbitTarget: OrbitTarget = body.orbitTarget ?? 'prod';
-  const portalToken = await portal.exchangeAuthCode(body.portalAuthCode, body.redirectUri);
+  let portalToken: string;
+  try {
+    portalToken = await portal.exchangeAuthCode(body.portalAuthCode, body.redirectUri);
+  } catch (err) {
+    throw toAccessError(err, 'Portal OAuth exchange failed', 401);
+  }
   const portalUser = await portal.getMe(portalToken);
   const permissions = await portal.getProjectPermissions(portalToken, portalUser.userId);
   const access = await resolveProvisionedAccess(portalUser, permissions.projects);
@@ -41,8 +67,27 @@ export async function exchangePortalSession(
   const effectiveProjects = access.projects;
   const roleRefs = access.roleRefs;
 
-  const creds = getOrbitCreds(orbitTarget);
-  let orbitUser = await findOrbitUserByEmail(creds, portalUser.email);
+  let creds;
+  try {
+    creds = getOrbitCreds(orbitTarget);
+  } catch (err) {
+    throw toAccessError(
+      err,
+      `ORBIT admin credentials missing for target=${orbitTarget}. Set ORBIT_ADMIN_TOKEN / ORBIT_DEV_ADMIN_TOKEN on prism-permissions.`,
+      503,
+    );
+  }
+
+  let orbitUser = null;
+  try {
+    orbitUser = await findOrbitUserByEmail(creds, portalUser.email);
+  } catch (err) {
+    throw toAccessError(
+      err,
+      'ORBIT user lookup failed — verify ORBIT_ADMIN_TOKEN and ORBIT_DEV_ADMIN_TOKEN on prism-permissions.',
+      502,
+    );
+  }
   if (!orbitUser && process.env.ORBIT_AUTO_INVITE === '1') {
     try {
       orbitUser = await inviteOrbitUser(

@@ -19,6 +19,11 @@ export class GooglePortalAdapter implements PortalAdapter {
   }
 
   async exchangeAuthCode(code: string, redirectUri?: string): Promise<string> {
+    if (!redirectUri?.trim()) {
+      throw new Error(
+        'redirectUri required for Google OAuth code exchange (connector must send http://localhost:29364/)',
+      );
+    }
     const client = await this.oauthClient(redirectUri);
     const { tokens } = await client.getToken({ code, redirect_uri: redirectUri });
     const accessToken = tokens.access_token;

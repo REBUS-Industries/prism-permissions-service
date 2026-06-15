@@ -1,10 +1,54 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { PortalAdapter } from '../portal/adapter.js';
 import type { AccessSessionRequest } from '../contracts/portal-access.js';
 import { AccessError, exchangePortalSession, getSessionManifest, revokeSession } from '../access/session.js';
 import { resolvePortalUser } from '../access/portalUser.js';
 import { checkProvisionedAdmin } from '../workspace/service.js';
-import { getIntegrationSettingOr } from '../config/integrationSettings.js';
+import { getIntegrationSetting, getIntegrationSettingOr } from '../config/integrationSettings.js';
+
+function publicBaseUrl(req: FastifyRequest): string {
+  const env = process.env.PUBLIC_BASE_URL?.trim();
+  if (env) return env.replace(/\/$/, '');
+  const host = req.headers['x-forwarded-host'] ?? req.hostname;
+  const proto = req.headers['x-forwarded-proto'] ?? req.protocol;
+  return `${proto}://${host}`.replace(/\/$/, '');
+}
+
+/** Build browser URL for connector "Sign in with REBUS" (Google or mock). */
+async function buildAccessLoginUrl(redirectUri: string): Promise<string> {
+  const adapter = (await getIntegrationSettingOr('portal_adapter', 'mock')).toLowerCase();
+
+  if (adapter === 'mock') {
+    const persona = await getIntegrationSettingOr('portal_mock_persona', 'alice');
+    return `/api/access/mock-login?redirect_uri=${encodeURIComponent(redirectUri)}&persona=${encodeURIComponent(persona)}`;
+  }
+
+  if (adapter === 'google') {
+    const clientId = await getIntegrationSetting('google_oauth_client_id');
+    if (!clientId) {
+      throw new AccessError('Google OAuth is not configured in PRISM Settings', 503);
+    }
+    const scopes = await getIntegrationSettingOr('google_oauth_scopes', 'openid email profile');
+    const domain = await getIntegrationSetting('workspace_domain');
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id', clientId);
+    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', scopes);
+    url.searchParams.set('access_type', 'online');
+    url.searchParams.set('prompt', 'select_account');
+    if (domain) url.searchParams.set('hd', domain);
+    return url.toString();
+  }
+
+  const authorizeBase = (await getIntegrationSetting('portal_google_authorize_url'))?.trim();
+  if (!authorizeBase) {
+    throw new AccessError('Portal Google authorize URL is not configured', 503);
+  }
+  const url = new URL(authorizeBase);
+  url.searchParams.set('redirect_uri', redirectUri);
+  return url.toString();
+}
 
 export async function registerAccessRoutes(app: FastifyInstance, portal: PortalAdapter) {
   /** Dev-only mock portal redirect (mock adapter). */
@@ -22,6 +66,25 @@ export async function registerAccessRoutes(app: FastifyInstance, portal: PortalA
       return reply.redirect(url.toString());
     },
   );
+
+  /** Connector OAuth entry — redirects to Google (or mock-login) with connector loopback callback. */
+  app.get<{ Querystring: { redirect_uri?: string } }>('/api/access/login', async (req, reply) => {
+    const redirectUri = req.query.redirect_uri?.trim();
+    if (!redirectUri) return reply.status(400).send({ error: 'redirect_uri required' });
+    try {
+      const target = await buildAccessLoginUrl(redirectUri);
+      if (target.startsWith('/')) {
+        return reply.redirect(`${publicBaseUrl(req)}${target}`);
+      }
+      return reply.redirect(target);
+    } catch (err) {
+      if (err instanceof AccessError) {
+        return reply.status(err.status).send({ error: err.message });
+      }
+      req.log.error(err);
+      return reply.status(500).send({ error: err instanceof Error ? err.message : 'Login redirect failed' });
+    }
+  });
 
   app.get<{ Querystring: { email?: string } }>('/api/access/provisioned-admin', async (req, reply) => {
     const email = req.query.email?.trim();
@@ -57,7 +120,8 @@ export async function registerAccessRoutes(app: FastifyInstance, portal: PortalA
         return reply.status(err.status).send({ error: err.message });
       }
       req.log.error(err);
-      return reply.status(500).send({ error: 'Session exchange failed' });
+      const message = err instanceof Error ? err.message : 'Session exchange failed';
+      return reply.status(500).send({ error: message });
     }
   });
 
