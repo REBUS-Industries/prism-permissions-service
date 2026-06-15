@@ -12,8 +12,8 @@ export function getOrbitCreds(target: OrbitTarget): OrbitCreds {
       : (process.env.ORBIT_SERVER_URL ?? '');
   const token =
     target === 'dev'
-      ? (process.env.ORBIT_DEV_ADMIN_TOKEN ?? process.env.ORBIT_ADMIN_TOKEN ?? '')
-      : (process.env.ORBIT_ADMIN_TOKEN ?? '');
+      ? (process.env.ORBIT_DEV_ADMIN_TOKEN || process.env.ORBIT_ADMIN_TOKEN || '')
+      : (process.env.ORBIT_ADMIN_TOKEN || '');
   if (!url || !token) {
     throw new Error(`ORBIT admin credentials missing for target=${target}`);
   }
