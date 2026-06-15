@@ -1,0 +1,43 @@
+# prism-permissions-service
+
+Portal-brokered access + node-based connector permissions for PRISM/ORBIT.
+
+## Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/access/session` | — | Exchange portal OAuth code → `{ manifest }` |
+| GET | `/api/access/manifest?sessionId=` | — | Refresh manifest for session |
+| GET | `/api/access/mock-login` | — | Dev mock portal redirect (mock adapter only) |
+| GET/PUT | `/api/permissions/policy` | admin cookie | Node graph CRUD |
+| GET | `/health` | — | Liveness |
+
+Port **8771** · image `ghcr.io/rebus-industries/prism-permissions-service`
+
+## Environment
+
+| Variable | Description |
+|----------|-------------|
+| `POSTGRES_URL` | Permissions DB (or shared prism DB) |
+| `SESSION_SECRET` | Must match PRISM admin cookie secret |
+| `PORTAL_ADAPTER` | `mock` (default) or `real` |
+| `PORTAL_BASE_URL` | REBUS portal API base |
+| `PORTAL_API_KEY` | Service-to-portal bearer |
+| `ORBIT_SERVER_URL` | Prod ORBIT GraphQL |
+| `ORBIT_DEV_SERVER_URL` | Dev ORBIT GraphQL |
+| `ORBIT_ADMIN_TOKEN` | Admin PAT for token minting |
+| `ORBIT_AUTO_INVITE` | `1` to invite missing ORBIT users |
+
+## Mock login (dev)
+
+```
+GET /api/access/mock-login?redirect_uri=http://localhost:29364/&persona=alice
+→ redirects with ?code=mock:alice
+
+POST /api/access/session { "portalAuthCode": "mock:alice" }
+```
+
+## Repo setup
+
+Push this scaffold to `REBUS-Industries/prism-permissions-service` on branch `main`.
+Set org secret `PRISM_DISPATCH_TOKEN` for deploy dispatch to the prism monorepo.
