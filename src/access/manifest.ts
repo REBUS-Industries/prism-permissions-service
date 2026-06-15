@@ -52,15 +52,18 @@ function grantsFromGraph(
   graph: Awaited<ReturnType<typeof loadPolicyGraph>>,
   portalUser: { email: string },
   project: PortalProjectPermission,
+  roleRefs: string[] = [],
 ): ConnectorFunction[] {
   const base = LEVEL_FUNCTIONS[project.level] ?? graph.defaultFunctions;
   const allowed = new Set<ConnectorFunction>(base);
+  const normalizedRoles = new Set(roleRefs.map((r) => r.toLowerCase()));
 
   const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
   const functionNodes = graph.nodes.filter((n) => n.type === 'function');
   const principalNodes = graph.nodes.filter(
     (n) =>
       (n.type === 'user' && n.ref?.toLowerCase() === portalUser.email.toLowerCase()) ||
+      (n.type === 'role' && n.ref && normalizedRoles.has(n.ref.toLowerCase())) ||
       (n.type === 'role' && n.ref === project.level) ||
       (n.type === 'project' && n.ref === project.orbitProjectId),
   );
@@ -93,13 +96,15 @@ export async function buildConnectorManifest(input: {
   expiresAt: Date;
   portalUser: { userId: string; email: string; displayName?: string | null };
   portalProjects: PortalProjectPermission[];
+  roleRefs?: string[];
 }): Promise<ConnectorManifest> {
   const graph = await loadPolicyGraph();
+  const roleRefs = input.roleRefs ?? [];
   const projects: ConnectorManifestProject[] = input.portalProjects.map((p) => ({
     orbitProjectId: p.orbitProjectId,
     projectName: p.projectName,
     level: p.level,
-    allowedFunctions: grantsFromGraph(graph, input.portalUser, p),
+    allowedFunctions: grantsFromGraph(graph, input.portalUser, p, roleRefs),
   }));
 
   return {

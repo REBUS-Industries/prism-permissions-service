@@ -98,3 +98,55 @@ export const policySettings = pgTable('policy_settings', {
   defaultFunctions: jsonb('default_functions').$type<string[]>().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const googleWorkspace = pgTable(
+  'google_workspace',
+  {
+    id: text('id').primaryKey(),
+    domain: text('domain').notNull(),
+    displayName: text('display_name'),
+    status: text('status').notNull().default('disconnected'),
+    adapter: text('adapter').notNull().default('mock'),
+    linkedAt: timestamp('linked_at', { withTimezone: true }),
+    lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+    settings: jsonb('settings').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('google_workspace_domain_idx').on(t.domain)],
+);
+
+export const provisionedUser = pgTable(
+  'provisioned_user',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => googleWorkspace.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    displayName: text('display_name'),
+    googleSub: text('google_sub'),
+    status: text('status').notNull().default('pending'),
+    source: text('source').notNull().default('manual'),
+    isPrismAdmin: boolean('is_prism_admin').notNull().default(false),
+    prismAdminUsername: text('prism_admin_username'),
+    projectPermissions: jsonb('project_permissions')
+      .$type<
+        {
+          orbitProjectId: string;
+          level: string;
+          projectName?: string | null;
+        }[]
+      >()
+      .notNull()
+      .default([]),
+    roleRefs: jsonb('role_refs').$type<string[]>().notNull().default([]),
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('provisioned_user_workspace_idx').on(t.workspaceId),
+    uniqueIndex('provisioned_user_email_idx').on(t.email),
+  ],
+);

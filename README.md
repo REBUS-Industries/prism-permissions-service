@@ -7,9 +7,15 @@ Portal-brokered access + node-based connector permissions for PRISM/ORBIT.
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/api/access/session` | — | Exchange portal OAuth code → `{ manifest }` |
+| POST | `/api/access/portal-user` | — | Validate portal OAuth code → `{ user }` (admin Google login) |
 | GET | `/api/access/manifest?sessionId=` | — | Refresh manifest for session |
 | GET | `/api/access/mock-login` | — | Dev mock portal redirect (mock adapter only) |
 | GET/PUT | `/api/permissions/policy` | admin cookie | Node graph CRUD |
+| GET | `/api/permissions/workspace` | admin cookie | Workspace link + provisioned users |
+| POST | `/api/permissions/workspace/link` | admin cookie | Link Google Workspace domain |
+| POST | `/api/permissions/workspace/sync` | admin cookie | Import directory users |
+| POST/PATCH/DELETE | `/api/permissions/workspace/users` | admin cookie | Manage provisioned users |
+| GET | `/api/access/provisioned-admin?email=` | — | Admin login allow-check |
 | GET | `/health` | — | Liveness |
 
 Port **8771** · image `ghcr.io/rebus-industries/prism-permissions-service`

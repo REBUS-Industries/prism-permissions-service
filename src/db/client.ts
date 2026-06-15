@@ -1,6 +1,6 @@
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import * as schema from './schema.js';
@@ -23,10 +23,16 @@ export function getDb() {
 export async function runMigrations() {
   const url = process.env.POSTGRES_URL ?? process.env.PERMISSIONS_POSTGRES_URL;
   if (!url) return;
-  const migrationSql = readFileSync(join(__dirname, 'migrations', '0000_init.sql'), 'utf8');
+  const migrationsDir = join(__dirname, 'migrations');
+  const files = readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
   const client = postgres(url, { max: 1 });
   try {
-    await client.unsafe(migrationSql);
+    for (const file of files) {
+      const migrationSql = readFileSync(join(migrationsDir, file), 'utf8');
+      await client.unsafe(migrationSql);
+    }
   } finally {
     await client.end();
   }

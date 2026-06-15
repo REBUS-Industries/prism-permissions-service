@@ -4,6 +4,7 @@ import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import { registerAccessRoutes } from './api/access.js';
 import { registerPermissionsRoutes } from './api/permissions.js';
+import { registerWorkspaceRoutes } from './api/workspace.js';
 import { runMigrations } from './db/client.js';
 import { createPortalAdapter } from './portal/adapter.js';
 
@@ -41,16 +42,13 @@ async function buildApp() {
 
   await runMigrations();
 
-  const portal = createPortalAdapter({
-    baseUrl: process.env.PORTAL_BASE_URL ?? 'https://portal.rebus.industries',
-    apiKey: process.env.PORTAL_API_KEY,
-    cacheTtlMs: Number(process.env.PORTAL_CACHE_TTL_MS ?? 300_000),
-  });
+  const portal = await createPortalAdapter();
 
   app.get('/health', async () => ({ status: 'ok', service: 'prism-permissions' }));
 
   await registerAccessRoutes(app, portal);
   await registerPermissionsRoutes(app);
+  await registerWorkspaceRoutes(app);
 
   return app;
 }

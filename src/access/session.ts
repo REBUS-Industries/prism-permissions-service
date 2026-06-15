@@ -13,6 +13,7 @@ import { mintScopedOrbitToken } from '../orbit/mint.js';
 import type { PortalAdapter } from '../portal/adapter.js';
 import { buildConnectorManifest, collectEffectiveFunctions } from './manifest.js';
 import { getOrbitCreds, type OrbitTarget } from '../orbit/client.js';
+import { resolveProvisionedAccess, recordProvisionedLogin } from '../workspace/service.js';
 
 export class AccessError extends Error {
   constructor(
@@ -32,6 +33,13 @@ export async function exchangePortalSession(
   const portalToken = await portal.exchangeAuthCode(body.portalAuthCode, body.redirectUri);
   const portalUser = await portal.getMe(portalToken);
   const permissions = await portal.getProjectPermissions(portalToken, portalUser.userId);
+  const access = await resolveProvisionedAccess(portalUser, permissions.projects);
+  if (access.blocked) {
+    throw new AccessError(access.reason ?? 'Access denied', 403);
+  }
+  await recordProvisionedLogin(portalUser);
+  const effectiveProjects = access.projects;
+  const roleRefs = access.roleRefs;
 
   const creds = getOrbitCreds(orbitTarget);
   let orbitUser = await findOrbitUserByEmail(creds, portalUser.email);
@@ -84,7 +92,7 @@ export async function exchangePortalSession(
     });
   }
 
-  for (const p of permissions.projects) {
+  for (const p of effectiveProjects) {
     const cacheId = `${orbitUserId}:${p.orbitProjectId}`;
     await db
       .insert(projectPermissionCache)
@@ -107,8 +115,8 @@ export async function exchangePortalSession(
   }
 
   const sessionId = randomUUID();
-  const projectIds = permissions.projects.map((p) => p.orbitProjectId);
-  const graphFunctions = permissions.projects.flatMap((p) => {
+  const projectIds = effectiveProjects.map((p) => p.orbitProjectId);
+  const graphFunctions = effectiveProjects.flatMap((p) => {
     const levelFns =
       p.level === 'owner' || p.level === 'admin'
         ? ['send', 'receive', 'list_projects', 'list_models', 'list_versions', 'create_project', 'create_model', 'create_version']
@@ -134,7 +142,8 @@ export async function exchangePortalSession(
     orbitToken: minted.token,
     expiresAt: minted.expiresAt,
     portalUser,
-    portalProjects: permissions.projects,
+    portalProjects: effectiveProjects,
+    roleRefs,
   });
 
   const mintRowId = randomUUID();
