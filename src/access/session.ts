@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import type { AccessSessionRequest } from '../contracts/portal-access.js';
+import type { AccessSessionRequest, PortalProjectPermission } from '../contracts/portal-access.js';
 import { getDb } from '../db/client.js';
 import {
   accessSession,
@@ -8,11 +8,16 @@ import {
   mintedToken,
   projectPermissionCache,
 } from '../db/schema.js';
-import { findOrbitUserByEmail, inviteOrbitUser, OrbitClientError } from '../orbit/client.js';
+import {
+  findOrbitUserByEmail,
+  getOrbitCreds,
+  inviteOrbitUser,
+  resolveOrbitServerUrl,
+  type OrbitTarget,
+} from '../orbit/client.js';
 import { mintScopedOrbitToken } from '../orbit/mint.js';
 import type { PortalAdapter } from '../portal/adapter.js';
 import { buildConnectorManifest, collectEffectiveFunctions } from './manifest.js';
-import { getOrbitCreds, type OrbitTarget } from '../orbit/client.js';
 import { resolveProvisionedAccess, recordProvisionedLogin } from '../workspace/service.js';
 
 export class AccessError extends Error {
@@ -27,9 +32,6 @@ export class AccessError extends Error {
 
 function toAccessError(err: unknown, fallback: string, status = 500): AccessError {
   if (err instanceof AccessError) return err;
-  if (err instanceof OrbitClientError) {
-    return new AccessError(err.message, err.status >= 400 && err.status < 600 ? err.status : 502);
-  }
   if (err instanceof Error) {
     const message = err.message.trim() || fallback;
     if (/invalid_grant/i.test(message)) {
@@ -38,90 +40,40 @@ function toAccessError(err: unknown, fallback: string, status = 500): AccessErro
         401,
       );
     }
-    if (/ORBIT admin credentials missing/i.test(message)) {
-      return new AccessError(message, 503);
-    }
     return new AccessError(message, status);
   }
   return new AccessError(fallback, status);
 }
 
-export async function exchangePortalSession(
-  portal: PortalAdapter,
-  body: AccessSessionRequest,
+export function shouldProvisionOrbit(projects: PortalProjectPermission[]): boolean {
+  return projects.length > 0;
+}
+
+export function sessionExpiry(): Date {
+  const lifespan = Number(process.env.ORBIT_TOKEN_LIFESPAN_SEC ?? 86400);
+  return new Date(Date.now() + lifespan * 1000);
+}
+
+async function upsertIdentityLink(
+  portalUser: { userId: string; email: string; googleSub?: string | null },
+  orbitUserId: string,
 ) {
-  const orbitTarget: OrbitTarget = body.orbitTarget ?? 'prod';
-  let portalToken: string;
-  try {
-    portalToken = await portal.exchangeAuthCode(body.portalAuthCode, body.redirectUri);
-  } catch (err) {
-    throw toAccessError(err, 'Portal OAuth exchange failed', 401);
-  }
-  const portalUser = await portal.getMe(portalToken);
-  const permissions = await portal.getProjectPermissions(portalToken, portalUser.userId);
-  const access = await resolveProvisionedAccess(portalUser, permissions.projects);
-  if (access.blocked) {
-    throw new AccessError(access.reason ?? 'Access denied', 403);
-  }
-  await recordProvisionedLogin(portalUser);
-  const effectiveProjects = access.projects;
-  const roleRefs = access.roleRefs;
-
-  let creds;
-  try {
-    creds = getOrbitCreds(orbitTarget);
-  } catch (err) {
-    throw toAccessError(
-      err,
-      `ORBIT admin credentials missing for target=${orbitTarget}. Set ORBIT_ADMIN_TOKEN / ORBIT_DEV_ADMIN_TOKEN on prism-permissions.`,
-      503,
-    );
-  }
-
-  let orbitUser = null;
-  try {
-    orbitUser = await findOrbitUserByEmail(creds, portalUser.email);
-  } catch (err) {
-    throw toAccessError(
-      err,
-      'ORBIT user lookup failed — verify ORBIT_ADMIN_TOKEN and ORBIT_DEV_ADMIN_TOKEN on prism-permissions.',
-      502,
-    );
-  }
-  if (!orbitUser && process.env.ORBIT_AUTO_INVITE === '1') {
-    try {
-      orbitUser = await inviteOrbitUser(
-        creds,
-        portalUser.email,
-        portalUser.displayName ?? portalUser.email,
-      );
-    } catch {
-      // Invite may fail (missing users:invite scope) — fall through to synthetic id + admin-token mint.
-    }
-  }
-  const orbitUserId = orbitUser?.id ?? `portal:${portalUser.userId}`;
-  if (!orbitUser && process.env.ORBIT_AUTO_INVITE !== '1') {
-    throw new AccessError(
-      `No ORBIT user for ${portalUser.email}. Set ORBIT_AUTO_INVITE=1 or invite manually.`,
-      403,
-    );
-  }
-
   const db = getDb();
   const now = new Date();
-  let link = await db
+  const existing = await db
     .select()
     .from(identityLink)
     .where(eq(identityLink.portalUserId, portalUser.userId))
     .limit(1);
-  const linkId = link[0]?.id ?? randomUUID();
-  if (link[0]) {
+  const linkId = existing[0]?.id ?? randomUUID();
+
+  if (existing[0]) {
     await db
       .update(identityLink)
       .set({
         email: portalUser.email,
         googleSub: portalUser.googleSub ?? null,
-        orbitUserId: orbitUser?.id ?? orbitUserId,
+        orbitUserId,
         updatedAt: now,
       })
       .where(eq(identityLink.id, linkId));
@@ -131,19 +83,28 @@ export async function exchangePortalSession(
       portalUserId: portalUser.userId,
       googleSub: portalUser.googleSub ?? null,
       email: portalUser.email,
-      orbitUserId: orbitUserId,
+      orbitUserId,
       createdAt: now,
       updatedAt: now,
     });
   }
 
-  for (const p of effectiveProjects) {
+  return linkId;
+}
+
+async function cacheProjectPermissions(
+  orbitUserId: string,
+  projects: PortalProjectPermission[],
+) {
+  const db = getDb();
+  const now = new Date();
+  for (const p of projects) {
     const cacheId = `${orbitUserId}:${p.orbitProjectId}`;
     await db
       .insert(projectPermissionCache)
       .values({
         id: cacheId,
-        orbitUserId: orbitUser?.id ?? orbitUserId,
+        orbitUserId,
         orbitProjectId: p.orbitProjectId,
         level: p.level,
         projectName: p.projectName ?? null,
@@ -158,10 +119,52 @@ export async function exchangePortalSession(
         },
       });
   }
+}
 
-  const sessionId = randomUUID();
-  const projectIds = effectiveProjects.map((p) => p.orbitProjectId);
-  const graphFunctions = effectiveProjects.flatMap((p) => {
+async function persistAccessSession(input: {
+  sessionId: string;
+  linkId: string;
+  orbitTarget: OrbitTarget;
+  manifest: Awaited<ReturnType<typeof buildConnectorManifest>>;
+  expiresAt: Date;
+  mintRow: {
+    orbitUserId: string;
+    email: string;
+    projectIds: string[];
+    scopes: string[];
+    tokenPrefix: string;
+  };
+}) {
+  const db = getDb();
+  const now = new Date();
+  const mintRowId = randomUUID();
+
+  await db.insert(mintedToken).values({
+    id: mintRowId,
+    sessionId: input.sessionId,
+    orbitUserId: input.mintRow.orbitUserId,
+    email: input.mintRow.email,
+    orbitTarget: input.orbitTarget,
+    projectIds: input.mintRow.projectIds,
+    scopes: input.mintRow.scopes,
+    tokenPrefix: input.mintRow.tokenPrefix,
+    expiresAt: input.expiresAt,
+    createdAt: now,
+  });
+
+  await db.insert(accessSession).values({
+    id: input.sessionId,
+    identityLinkId: input.linkId,
+    mintedTokenId: mintRowId,
+    orbitTarget: input.orbitTarget,
+    manifest: input.manifest,
+    expiresAt: input.expiresAt,
+    createdAt: now,
+  });
+}
+
+function graphFunctionsForProjects(projects: PortalProjectPermission[]) {
+  return projects.flatMap((p) => {
     const levelFns =
       p.level === 'owner' || p.level === 'admin'
         ? ['send', 'receive', 'list_projects', 'list_models', 'list_versions', 'create_project', 'create_model', 'create_version']
@@ -170,49 +173,132 @@ export async function exchangePortalSession(
           : ['list_projects', 'list_models', 'list_versions', 'receive'];
     return levelFns;
   }) as import('../contracts/portal-access.js').ConnectorFunction[];
+}
 
-  const minted = await mintScopedOrbitToken({
-    target: orbitTarget,
-    orbitUserId,
-    email: portalUser.email,
-    projectIds,
-    functions: [...new Set(graphFunctions)],
+async function tryMintOrbitToken(input: {
+  orbitTarget: OrbitTarget;
+  portalUser: { userId: string; email: string; displayName?: string | null };
+  projects: PortalProjectPermission[];
+  sessionId: string;
+}): Promise<{ orbitToken: string; orbitUserId: string; scopes: string[]; projectIds: string[] } | null> {
+  if (!shouldProvisionOrbit(input.projects)) return null;
+
+  let creds;
+  try {
+    creds = getOrbitCreds(input.orbitTarget);
+  } catch {
+    return null;
+  }
+
+  let orbitUser = null;
+  try {
+    orbitUser = await findOrbitUserByEmail(creds, input.portalUser.email);
+  } catch {
+    // ORBIT lookup is best-effort — PRISM login must still succeed.
+  }
+
+  if (!orbitUser && process.env.ORBIT_AUTO_INVITE === '1') {
+    try {
+      orbitUser = await inviteOrbitUser(
+        creds,
+        input.portalUser.email,
+        input.portalUser.displayName ?? input.portalUser.email,
+      );
+    } catch {
+      // Invite may fail (missing users:invite scope).
+    }
+  }
+
+  const orbitUserId = orbitUser?.id ?? `portal:${input.portalUser.userId}`;
+  const projectIds = input.projects.map((p) => p.orbitProjectId);
+  const functions = [...new Set(graphFunctionsForProjects(input.projects))];
+
+  try {
+    const minted = await mintScopedOrbitToken({
+      target: input.orbitTarget,
+      orbitUserId,
+      email: input.portalUser.email,
+      projectIds,
+      functions,
+      sessionId: input.sessionId,
+    });
+    return {
+      orbitToken: minted.token,
+      orbitUserId,
+      scopes: minted.scopes,
+      projectIds,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function exchangePortalSession(
+  portal: PortalAdapter,
+  body: AccessSessionRequest,
+) {
+  const orbitTarget: OrbitTarget = body.orbitTarget ?? 'prod';
+  let portalToken: string;
+  try {
+    portalToken = await portal.exchangeAuthCode(body.portalAuthCode, body.redirectUri);
+  } catch (err) {
+    throw toAccessError(err, 'Portal OAuth exchange failed', 401);
+  }
+
+  const portalUser = await portal.getMe(portalToken);
+  const permissions = await portal.getProjectPermissions(portalToken, portalUser.userId);
+  const access = await resolveProvisionedAccess(portalUser, permissions.projects);
+  if (access.blocked) {
+    throw new AccessError(access.reason ?? 'Access denied', 403);
+  }
+
+  await recordProvisionedLogin(portalUser);
+  const effectiveProjects = access.projects;
+  const roleRefs = access.roleRefs;
+
+  const sessionId = randomUUID();
+  const expiresAt = sessionExpiry();
+  const orbitServerUrl = resolveOrbitServerUrl(orbitTarget);
+  const orbitUserId = `portal:${portalUser.userId}`;
+
+  const linkId = await upsertIdentityLink(portalUser, orbitUserId);
+  if (effectiveProjects.length > 0) {
+    await cacheProjectPermissions(orbitUserId, effectiveProjects);
+  }
+
+  const minted = await tryMintOrbitToken({
+    orbitTarget,
+    portalUser,
+    projects: effectiveProjects,
     sessionId,
   });
 
   const manifest = await buildConnectorManifest({
     sessionId,
     orbitTarget,
-    orbitServerUrl: creds.url,
-    orbitToken: minted.token,
-    expiresAt: minted.expiresAt,
+    orbitServerUrl,
+    orbitToken: minted?.orbitToken ?? '',
+    expiresAt,
     portalUser,
     portalProjects: effectiveProjects,
     roleRefs,
+    orbitFunctionsEnabled: Boolean(minted?.orbitToken),
+    prismAccessToken: sessionId,
   });
 
-  const mintRowId = randomUUID();
-  await db.insert(mintedToken).values({
-    id: mintRowId,
+  await persistAccessSession({
     sessionId,
-    orbitUserId,
-    email: portalUser.email,
-    orbitTarget,
-    projectIds,
-    scopes: minted.scopes,
-    tokenPrefix: minted.token.slice(0, 8),
-    expiresAt: minted.expiresAt,
-    createdAt: now,
-  });
-
-  await db.insert(accessSession).values({
-    id: sessionId,
-    identityLinkId: linkId,
-    mintedTokenId: mintRowId,
+    linkId,
     orbitTarget,
     manifest,
-    expiresAt: minted.expiresAt,
-    createdAt: now,
+    expiresAt,
+    mintRow: {
+      orbitUserId: minted?.orbitUserId ?? orbitUserId,
+      email: portalUser.email,
+      projectIds: minted?.projectIds ?? effectiveProjects.map((p) => p.orbitProjectId),
+      scopes: minted?.scopes ?? [],
+      tokenPrefix: minted?.orbitToken ? minted.orbitToken.slice(0, 8) : 'prism-only',
+    },
   });
 
   return { manifest, effectiveFunctions: collectEffectiveFunctions(manifest) };

@@ -97,14 +97,21 @@ export async function buildConnectorManifest(input: {
   portalUser: { userId: string; email: string; displayName?: string | null };
   portalProjects: PortalProjectPermission[];
   roleRefs?: string[];
+  /** When false, ORBIT connector functions are withheld (PRISM-only login). */
+  orbitFunctionsEnabled?: boolean;
+  /** PRISM portal session bearer for Library/API until ORBIT is provisioned. */
+  prismAccessToken?: string;
 }): Promise<ConnectorManifest> {
   const graph = await loadPolicyGraph();
   const roleRefs = input.roleRefs ?? [];
+  const orbitFunctionsEnabled = input.orbitFunctionsEnabled !== false && input.orbitToken.length > 0;
   const projects: ConnectorManifestProject[] = input.portalProjects.map((p) => ({
     orbitProjectId: p.orbitProjectId,
     projectName: p.projectName,
     level: p.level,
-    allowedFunctions: grantsFromGraph(graph, input.portalUser, p, roleRefs),
+    allowedFunctions: orbitFunctionsEnabled
+      ? grantsFromGraph(graph, input.portalUser, p, roleRefs)
+      : [],
   }));
 
   return {
@@ -117,8 +124,9 @@ export async function buildConnectorManifest(input: {
     orbitToken: input.orbitToken,
     expiresAt: input.expiresAt.toISOString(),
     sessionId: input.sessionId,
+    prismAccessToken: input.prismAccessToken ?? input.sessionId,
     projects,
-    globalAllowedFunctions: graph.defaultFunctions,
+    globalAllowedFunctions: orbitFunctionsEnabled ? graph.defaultFunctions : [],
   };
 }
 
