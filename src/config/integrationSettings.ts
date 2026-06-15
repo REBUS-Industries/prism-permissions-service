@@ -27,6 +27,7 @@ const ENV_MAP: Record<string, string> = {
   google_oauth_client_secret: 'GOOGLE_OAUTH_CLIENT_SECRET',
   google_oauth_scopes: 'GOOGLE_OAUTH_SCOPES',
   google_service_account_json: 'GOOGLE_SERVICE_ACCOUNT_JSON',
+  google_workspace_directory_refresh_token: 'GOOGLE_WORKSPACE_DIRECTORY_REFRESH_TOKEN',
 };
 
 const DEFAULTS: Record<string, string> = {

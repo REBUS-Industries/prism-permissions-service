@@ -16,11 +16,38 @@ interface GoogleDirectoryListResponse {
   nextPageToken?: string;
 }
 
-export async function listGoogleWorkspaceDirectory(domain: string): Promise<WorkspaceDirectoryUser[]> {
+async function getDirectoryAccessToken(): Promise<string> {
+  const refreshToken = await getIntegrationSetting('google_workspace_directory_refresh_token');
+  const clientId = await getIntegrationSetting('google_oauth_client_id');
+  const clientSecret = await getIntegrationSetting('google_oauth_client_secret');
+
+  if (refreshToken && clientId && clientSecret) {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        refresh_token: refreshToken,
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: 'refresh_token',
+      }),
+    });
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new Error(`Google directory OAuth refresh failed (${res.status}): ${detail}`);
+    }
+    const body = (await res.json()) as { access_token?: string };
+    if (!body.access_token) throw new Error('Google directory OAuth refresh returned no access token');
+    return body.access_token;
+  }
+
   const saJson = await getIntegrationSetting('google_service_account_json');
   const adminEmail = await getIntegrationSetting('workspace_admin_email');
   if (!saJson) {
-    throw new Error('google_service_account_json is not configured in Settings');
+    throw new Error(
+      'Directory sync is not configured. Authorize directory sync in Admin → Settings (no service account key), ' +
+        'or paste google_service_account_json when your org allows service account keys.',
+    );
   }
   if (!adminEmail) {
     throw new Error('workspace_admin_email is not configured — set the admin user to impersonate for directory sync');
@@ -43,6 +70,15 @@ export async function listGoogleWorkspaceDirectory(domain: string): Promise<Work
     subject: adminEmail,
   });
 
+  const tokenResponse = await auth.getAccessToken();
+  const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token;
+  if (!token) throw new Error('Failed to obtain Google Admin SDK access token via service account');
+  return token;
+}
+
+export async function listGoogleWorkspaceDirectory(domain: string): Promise<WorkspaceDirectoryUser[]> {
+  const accessToken = await getDirectoryAccessToken();
+
   const normalizedDomain = domain.trim().toLowerCase();
   const out: WorkspaceDirectoryUser[] = [];
   let pageToken: string | undefined;
@@ -54,11 +90,8 @@ export async function listGoogleWorkspaceDirectory(domain: string): Promise<Work
     url.searchParams.set('orderBy', 'email');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
 
-    const token = await auth.getAccessToken();
-    if (!token) throw new Error('Failed to obtain Google Admin SDK access token');
-
     const res = await fetch(url.toString(), {
-      headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
+      headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json' },
     });
     if (!res.ok) {
       const detail = await res.text();
@@ -81,3 +114,4 @@ export async function listGoogleWorkspaceDirectory(domain: string): Promise<Work
 
   return out;
 }
+
