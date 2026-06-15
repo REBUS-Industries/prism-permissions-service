@@ -70,6 +70,11 @@ export interface ConnectorManifest {
   sessionId: string;
   /** PRISM portal session bearer for Library/API until ORBIT projects are assigned. */
   prismAccessToken: string;
+  /**
+   * MVP: true for all portal users — connector treats this as full Send/Receive/List/Create
+   * on every ORBIT project. Phase 2: set ORBIT_BLANKET_ACCESS=0 and assign projects in PRISM Users.
+   */
+  orbitBlanketAccess: boolean;
   projects: ConnectorManifestProject[];
   globalAllowedFunctions: ConnectorFunction[];
 }

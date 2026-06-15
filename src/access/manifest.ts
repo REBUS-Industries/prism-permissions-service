@@ -97,22 +97,26 @@ export async function buildConnectorManifest(input: {
   portalUser: { userId: string; email: string; displayName?: string | null };
   portalProjects: PortalProjectPermission[];
   roleRefs?: string[];
-  /** When false, ORBIT connector functions are withheld (PRISM-only login). */
-  orbitFunctionsEnabled?: boolean;
-  /** PRISM portal session bearer for Library/API until ORBIT is provisioned. */
+  /** MVP blanket ORBIT access — see ConnectorManifest.orbitBlanketAccess. */
+  orbitBlanketAccess?: boolean;
+  /** PRISM portal session bearer for Library/API. */
   prismAccessToken?: string;
 }): Promise<ConnectorManifest> {
   const graph = await loadPolicyGraph();
   const roleRefs = input.roleRefs ?? [];
-  const orbitFunctionsEnabled = input.orbitFunctionsEnabled !== false && input.orbitToken.length > 0;
-  const projects: ConnectorManifestProject[] = input.portalProjects.map((p) => ({
-    orbitProjectId: p.orbitProjectId,
-    projectName: p.projectName,
-    level: p.level,
-    allowedFunctions: orbitFunctionsEnabled
-      ? grantsFromGraph(graph, input.portalUser, p, roleRefs)
-      : [],
-  }));
+  const blanket = input.orbitBlanketAccess === true;
+
+  // Phase 2: per-project entries when blanket is off and projects are provisioned.
+  const projects: ConnectorManifestProject[] = blanket
+    ? []
+    : input.portalProjects.map((p) => ({
+        orbitProjectId: p.orbitProjectId,
+        projectName: p.projectName,
+        level: p.level,
+        allowedFunctions: input.orbitToken
+          ? grantsFromGraph(graph, input.portalUser, p, roleRefs)
+          : [],
+      }));
 
   return {
     schema: CONNECTOR_MANIFEST_SCHEMA,
@@ -125,12 +129,19 @@ export async function buildConnectorManifest(input: {
     expiresAt: input.expiresAt.toISOString(),
     sessionId: input.sessionId,
     prismAccessToken: input.prismAccessToken ?? input.sessionId,
+    orbitBlanketAccess: blanket,
     projects,
-    globalAllowedFunctions: orbitFunctionsEnabled ? graph.defaultFunctions : [],
+    globalAllowedFunctions: blanket
+      ? [...CONNECTOR_FUNCTIONS]
+      : input.orbitToken
+        ? graph.defaultFunctions
+        : [],
   };
 }
 
+/** Effective connector functions for UI gating — blanket mode grants all ORBIT functions. */
 export function collectEffectiveFunctions(manifest: ConnectorManifest): ConnectorFunction[] {
+  if (manifest.orbitBlanketAccess) return [...CONNECTOR_FUNCTIONS];
   const set = new Set<ConnectorFunction>(manifest.globalAllowedFunctions);
   for (const p of manifest.projects) {
     for (const fn of p.allowedFunctions) set.add(fn);
