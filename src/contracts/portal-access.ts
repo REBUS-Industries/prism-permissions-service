@@ -68,6 +68,8 @@ export interface ConnectorManifest {
   orbitToken: string;
   expiresAt: string;
   sessionId: string;
+  /** PRISM portal session bearer for Library/API until ORBIT projects are assigned. */
+  prismAccessToken: string;
   projects: ConnectorManifestProject[];
   globalAllowedFunctions: ConnectorFunction[];
 }
