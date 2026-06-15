@@ -42,7 +42,8 @@ export async function exchangePortalSession(
       portalUser.displayName ?? portalUser.email,
     );
   }
-  if (!orbitUser) {
+  const orbitUserId = orbitUser?.id ?? `portal:${portalUser.userId}`;
+  if (!orbitUser && process.env.ORBIT_AUTO_INVITE !== '1') {
     throw new AccessError(
       `No ORBIT user for ${portalUser.email}. Set ORBIT_AUTO_INVITE=1 or invite manually.`,
       403,
@@ -63,7 +64,7 @@ export async function exchangePortalSession(
       .set({
         email: portalUser.email,
         googleSub: portalUser.googleSub ?? null,
-        orbitUserId: orbitUser.id,
+        orbitUserId: orbitUser?.id ?? orbitUserId,
         updatedAt: now,
       })
       .where(eq(identityLink.id, linkId));
@@ -73,19 +74,19 @@ export async function exchangePortalSession(
       portalUserId: portalUser.userId,
       googleSub: portalUser.googleSub ?? null,
       email: portalUser.email,
-      orbitUserId: orbitUser.id,
+      orbitUserId: orbitUserId,
       createdAt: now,
       updatedAt: now,
     });
   }
 
   for (const p of permissions.projects) {
-    const cacheId = `${orbitUser.id}:${p.orbitProjectId}`;
+    const cacheId = `${orbitUserId}:${p.orbitProjectId}`;
     await db
       .insert(projectPermissionCache)
       .values({
         id: cacheId,
-        orbitUserId: orbitUser.id,
+        orbitUserId: orbitUser?.id ?? orbitUserId,
         orbitProjectId: p.orbitProjectId,
         level: p.level,
         projectName: p.projectName ?? null,
@@ -115,7 +116,7 @@ export async function exchangePortalSession(
 
   const minted = await mintScopedOrbitToken({
     target: orbitTarget,
-    orbitUserId: orbitUser.id,
+    orbitUserId,
     email: portalUser.email,
     projectIds,
     functions: [...new Set(graphFunctions)],
@@ -136,7 +137,7 @@ export async function exchangePortalSession(
   await db.insert(mintedToken).values({
     id: mintRowId,
     sessionId,
-    orbitUserId: orbitUser.id,
+    orbitUserId,
     email: portalUser.email,
     orbitTarget,
     projectIds,

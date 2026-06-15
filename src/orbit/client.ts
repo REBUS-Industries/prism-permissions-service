@@ -52,16 +52,21 @@ async function gql<T>(creds: OrbitCreds, query: string, variables?: Record<strin
 }
 
 export async function findOrbitUserByEmail(creds: OrbitCreds, email: string) {
-  const data = await gql<{ userSearch: { items: { id: string; name: string; email: string }[] } }>(
+  const data = await gql<{ userSearch: { items: { id: string; name: string }[] } }>(
     creds,
     `query($query: String!) {
-      userSearch(query: $query, limit: 5) {
-        items { id name email }
+      userSearch(query: $query, limit: 10) {
+        items { id name }
       }
     }`,
-    { query: email },
+    { query: email.split('@')[0] ?? email },
   );
-  const match = data.userSearch.items.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+  const local = email.split('@')[0]?.toLowerCase() ?? '';
+  const match = data.userSearch.items.find((u) =>
+    u.name?.toLowerCase() === email.toLowerCase() ||
+    u.name?.toLowerCase() === local ||
+    u.name?.toLowerCase().includes(local),
+  );
   return match ?? null;
 }
 
