@@ -11,18 +11,19 @@ test('buildUserSearchQuery uses full email and rejects short strings', () => {
   assert.equal(buildUserSearchQuery('ab'), null);
 });
 
-test('useBlanketOrbitAccess defaults to true for MVP', () => {
+test('useBlanketOrbitAccess defaults to true; env kill-switch forces per-project', async () => {
   const prev = process.env.ORBIT_BLANKET_ACCESS;
   delete process.env.ORBIT_BLANKET_ACCESS;
-  assert.equal(useBlanketOrbitAccess([]), true);
+  // Settings DB is unavailable in tests → falls back to blanket on (default).
+  assert.equal(await useBlanketOrbitAccess([]), true);
   assert.equal(
-    useBlanketOrbitAccess([{ orbitProjectId: 'abc', level: 'viewer' }]),
+    await useBlanketOrbitAccess([{ orbitProjectId: 'abc', level: 'viewer' }]),
     true,
   );
   process.env.ORBIT_BLANKET_ACCESS = '0';
-  assert.equal(useBlanketOrbitAccess([]), true);
+  assert.equal(await useBlanketOrbitAccess([]), true);
   assert.equal(
-    useBlanketOrbitAccess([{ orbitProjectId: 'abc', level: 'viewer' }]),
+    await useBlanketOrbitAccess([{ orbitProjectId: 'abc', level: 'viewer' }]),
     false,
   );
   if (prev === undefined) delete process.env.ORBIT_BLANKET_ACCESS;

@@ -20,6 +20,7 @@ import { mintScopedOrbitToken } from '../orbit/mint.js';
 import type { PortalAdapter } from '../portal/adapter.js';
 import { buildConnectorManifest, collectEffectiveFunctions } from './manifest.js';
 import { resolveProvisionedAccess, recordProvisionedLogin } from '../workspace/service.js';
+import { getIntegrationSettingOr } from '../config/integrationSettings.js';
 
 export class AccessError extends Error {
   constructor(
@@ -47,11 +48,24 @@ function toAccessError(err: unknown, fallback: string, status = 500): AccessErro
 }
 
 /**
- * MVP: all provisioned portal users receive blanket ORBIT connector access (no per-project list).
- * Phase 2: set ORBIT_BLANKET_ACCESS=0 to emit project-scoped manifests from PRISM Users assignments.
+ * Blanket access: all provisioned portal users receive ORBIT connector access to
+ * every project (no per-project list). Controlled from Admin → Permissions via the
+ * `workspace_grant_all_projects` setting (default on). `ORBIT_BLANKET_ACCESS=0` is an
+ * ops kill-switch. When blanket is off, project-scoped manifests come from PRISM Users;
+ * users with no assignments still get blanket access so they are not locked out.
  */
-export function useBlanketOrbitAccess(provisionedProjects: PortalProjectPermission[]): boolean {
+export async function useBlanketOrbitAccess(provisionedProjects: PortalProjectPermission[]): Promise<boolean> {
   if (process.env.ORBIT_BLANKET_ACCESS === '0') {
+    return provisionedProjects.length === 0;
+  }
+  let enabled = true;
+  try {
+    enabled = (await getIntegrationSettingOr('workspace_grant_all_projects', '1')) !== '0';
+  } catch {
+    // Settings DB unavailable — default to blanket on so users are not locked out.
+    enabled = true;
+  }
+  if (!enabled) {
     return provisionedProjects.length === 0;
   }
   return true;
@@ -264,7 +278,7 @@ export async function exchangePortalSession(
   await recordProvisionedLogin(portalUser);
   const effectiveProjects = access.projects;
   const roleRefs = access.roleRefs;
-  const blanket = useBlanketOrbitAccess(effectiveProjects);
+  const blanket = await useBlanketOrbitAccess(effectiveProjects);
 
   const sessionId = randomUUID();
   const expiresAt = sessionExpiry();
