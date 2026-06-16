@@ -13,7 +13,10 @@ export class RealPortalAdapter implements PortalAdapter {
       accept: 'application/json',
       ...extra,
     };
-    if (this.config.apiKey) h.authorization = `Bearer ${this.config.apiKey}`;
+    // Service key for broker endpoints; user portal token must win on /me and project-permissions.
+    if (this.config.apiKey && !h.authorization) {
+      h.authorization = `Bearer ${this.config.apiKey}`;
+    }
     return h;
   }
 
