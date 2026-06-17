@@ -3,7 +3,7 @@ import type { PortalAdapter } from '../portal/adapter.js';
 import type { AccessSessionRequest, PrismTool, ToolAuthorizeRequest } from '../contracts/portal-access.js';
 import { AccessError, exchangePortalSession, getSessionManifest, revokeSession } from '../access/session.js';
 import { resolvePortalUser } from '../access/portalUser.js';
-import { authorizeTool, resolveEmailFromAdminUsername, resolveToolAccess } from '../access/tools.js';
+import { authorizeTool, fullLocalAdminToolAccess, resolveEmailFromAdminUsername, resolveToolAccess } from '../access/tools.js';
 import { checkProvisionedAdmin } from '../workspace/service.js';
 import { requireInternalServiceKey } from '../auth/permissionsEditor.js';
 import { getIntegrationSetting, getIntegrationSettingOr } from '../config/integrationSettings.js';
@@ -122,7 +122,7 @@ export async function registerAccessRoutes(app: FastifyInstance, portal: PortalA
   app.get('/api/access/me', async (req, reply) => {
     const adminEmail = await resolveEmailFromAdminCookie(req);
     if (adminEmail) {
-      return resolveToolAccess({ email: adminEmail });
+      return fullLocalAdminToolAccess(adminEmail);
     }
 
     const token = bearerToken(req);

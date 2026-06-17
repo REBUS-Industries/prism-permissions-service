@@ -44,6 +44,16 @@ export function collectRoleRefs(portalUser: PortalUser, extraRoleRefs: string[] 
   return [...roles];
 }
 
+/** PRISM admin cookie (username/password login) — always full tool access. */
+export function fullLocalAdminToolAccess(email: string): EffectiveToolAccess {
+  return {
+    email: normalizeEmail(email),
+    roles: ['local-admin'],
+    isPrismAdmin: true,
+    tools: [...PRISM_TOOLS],
+  };
+}
+
 export async function loadToolGrants(): Promise<ToolGrants> {
   const db = getDb();
   const rows = await db.select().from(toolGrant);
