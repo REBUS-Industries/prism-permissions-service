@@ -23,6 +23,17 @@ export const CONNECTOR_FUNCTIONS: ConnectorFunction[] = [
   'create_version',
 ];
 
+export type PrismTool = 'convert' | 'visualiser' | 'fixtures' | 'materials' | 'models';
+
+export const PRISM_TOOLS: PrismTool[] = [
+  'convert',
+  'visualiser',
+  'fixtures',
+  'materials',
+  'models',
+];
+
+export type PortalSystemRole = 'superAdmin' | 'admin' | 'staff' | 'viewer';
 export type PortalProjectLevel = 'viewer' | 'contributor' | 'owner' | 'admin';
 
 export interface PortalUser {
@@ -30,6 +41,8 @@ export interface PortalUser {
   email: string;
   googleSub?: string | null;
   displayName?: string | null;
+  role?: PortalSystemRole | string | null;
+  customRoleId?: string | null;
 }
 
 export interface PortalProjectPermission {
@@ -68,12 +81,7 @@ export interface ConnectorManifest {
   orbitToken: string;
   expiresAt: string;
   sessionId: string;
-  /** PRISM portal session bearer for Library/API until ORBIT projects are assigned. */
   prismAccessToken: string;
-  /**
-   * MVP: true for all portal users — connector treats this as full Send/Receive/List/Create
-   * on every ORBIT project. Phase 2: set ORBIT_BLANKET_ACCESS=0 and assign projects in PRISM Users.
-   */
   orbitBlanketAccess: boolean;
   projects: ConnectorManifestProject[];
   globalAllowedFunctions: ConnectorFunction[];
@@ -83,7 +91,7 @@ export interface AccessSessionResponse {
   manifest: ConnectorManifest;
 }
 
-export type PolicyNodeType = 'role' | 'user' | 'project' | 'function';
+export type PolicyNodeType = 'role' | 'user' | 'project' | 'function' | 'tool';
 
 export interface PolicyNode {
   id: string;
@@ -110,6 +118,34 @@ export interface FunctionPolicyGraph {
 export interface PermissionsPolicyResponse {
   graph: FunctionPolicyGraph;
   defaultFunctions: ConnectorFunction[];
+}
+
+export interface ToolGrants {
+  roles: Record<string, PrismTool[]>;
+  users?: Record<string, PrismTool[]>;
+}
+
+export interface ToolGrantsResponse {
+  grants: ToolGrants;
+  updatedAt?: string;
+}
+
+export interface EffectiveToolAccess {
+  email: string;
+  roles: string[];
+  isPrismAdmin: boolean;
+  tools: PrismTool[];
+}
+
+export interface ToolAuthorizeRequest {
+  email: string;
+  tool: PrismTool;
+}
+
+export interface ToolAuthorizeResponse {
+  allowed: boolean;
+  email: string;
+  tool: PrismTool;
 }
 
 export interface PortalAdapterConfig {

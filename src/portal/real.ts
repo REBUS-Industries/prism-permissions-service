@@ -46,7 +46,14 @@ export class RealPortalAdapter implements PortalAdapter {
     }
     const body = (await res.json()) as PortalUser;
     if (!body.userId || !body.email) throw new Error('Portal /me returned invalid payload');
-    return body;
+    return {
+      userId: body.userId,
+      email: body.email,
+      googleSub: body.googleSub ?? null,
+      displayName: body.displayName ?? null,
+      role: body.role ?? null,
+      customRoleId: body.customRoleId ?? null,
+    };
   }
 
   async getProjectPermissions(portalToken: string, userId: string): Promise<PortalProjectPermissionsResponse> {

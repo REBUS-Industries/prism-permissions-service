@@ -3,11 +3,16 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
   CONNECTOR_FUNCTIONS,
+  PRISM_TOOLS,
   type ConnectorFunction,
   type FunctionPolicyGraph,
   type PermissionsPolicyResponse,
+  type ToolGrants,
+  type ToolGrantsResponse,
 } from '../contracts/portal-access.js';
 import { requireAdmin } from '../auth/adminSession.js';
+import { requirePermissionsEditor } from '../auth/permissionsEditor.js';
+import { loadToolGrants, saveToolGrants } from '../access/tools.js';
 import { getDb } from '../db/client.js';
 import {
   functionPolicyEdges,
@@ -17,6 +22,29 @@ import {
 import { loadPolicyGraph } from '../access/manifest.js';
 
 export async function registerPermissionsRoutes(app: FastifyInstance) {
+  app.get('/api/permissions/tool-grants', { preHandler: requirePermissionsEditor }, async (): Promise<ToolGrantsResponse> => {
+    const grants = await loadToolGrants();
+    return { grants, updatedAt: new Date().toISOString() };
+  });
+
+  app.put<{ Body: { grants?: ToolGrants } }>(
+    '/api/permissions/tool-grants',
+    { preHandler: requirePermissionsEditor },
+    async (req, reply) => {
+      const grants = req.body?.grants;
+      if (!grants?.roles) {
+        return reply.status(400).send({ error: 'grants.roles required' });
+      }
+      await saveToolGrants({
+        roles: grants.roles,
+        users: grants.users ?? {},
+      });
+      return { grants: await loadToolGrants(), updatedAt: new Date().toISOString() };
+    },
+  );
+
+  app.get('/api/permissions/tools', async () => ({ tools: PRISM_TOOLS }));
+
   await app.register(async (adminRoutes) => {
     adminRoutes.addHook('preHandler', requireAdmin);
 

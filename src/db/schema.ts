@@ -99,6 +99,21 @@ export const policySettings = pgTable('policy_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const toolGrant = pgTable(
+  'tool_grant',
+  {
+    id: text('id').primaryKey(),
+    principalType: text('principal_type').notNull(),
+    principalRef: text('principal_ref').notNull(),
+    tool: text('tool').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('tool_grant_principal_tool_idx').on(t.principalType, t.principalRef, t.tool),
+    index('tool_grant_principal_idx').on(t.principalType, t.principalRef),
+  ],
+);
+
 export const googleWorkspace = pgTable(
   'google_workspace',
   {

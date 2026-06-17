@@ -11,12 +11,14 @@ const MOCK_USERS: Record<string, PortalUser> = {
     email: 'alice@rebus.industries',
     googleSub: 'google-sub-alice',
     displayName: 'Alice Dev',
+    role: 'staff',
   },
   'mock:bob': {
     userId: 'portal-user-bob',
     email: 'bob@rebus.industries',
     googleSub: 'google-sub-bob',
     displayName: 'Bob Viewer',
+    role: 'viewer',
   },
 };
 
