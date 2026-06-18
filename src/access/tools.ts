@@ -10,7 +10,9 @@ import {
 import { getDb } from '../db/client.js';
 import { toolGrant } from '../db/schema.js';
 
-const ADMIN_PORTAL_ROLES = new Set(['superadmin', 'admin', 'prism-admin']);
+// Role ids/names that grant full PRISM tool access. Portal super-admin id is
+// `super-admin` (SUPER_ADMIN_ROLE_ID); legacy spellings kept for safety.
+const ADMIN_PORTAL_ROLES = new Set(['super-admin', 'superadmin', 'admin', 'prism-admin']);
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -36,6 +38,12 @@ function legacyAdminEmails(): Set<string> {
 
 export function collectRoleRefs(portalUser: PortalUser, extraRoleRefs: string[] = []): string[] {
   const roles = new Set<string>();
+  // Portal keys grants on role ids now; prefer roleId / roleIds.
+  if (portalUser.roleId) roles.add(normalizeRole(portalUser.roleId));
+  for (const id of portalUser.roleIds ?? []) {
+    if (id?.trim()) roles.add(normalizeRole(id));
+  }
+  // Legacy fields (older portal builds) kept for backward-compat.
   if (portalUser.role) roles.add(normalizeRole(portalUser.role));
   if (portalUser.customRoleId) roles.add(normalizeRole(portalUser.customRoleId));
   for (const ref of extraRoleRefs) {

@@ -1,6 +1,7 @@
 import {
   PORTAL_ACCESS_SCHEMA,
   type PortalProjectPermissionsResponse,
+  type PortalRolesResponse,
   type PortalUser,
 } from '../contracts/portal-access.js';
 import type { PortalAdapter, PortalAdapterConfig } from './adapter.js';
@@ -11,6 +12,8 @@ const MOCK_USERS: Record<string, PortalUser> = {
     email: 'alice@rebus.industries',
     googleSub: 'google-sub-alice',
     displayName: 'Alice Dev',
+    roleId: 'staff',
+    roleIds: ['staff'],
     role: 'staff',
   },
   'mock:bob': {
@@ -18,6 +21,8 @@ const MOCK_USERS: Record<string, PortalUser> = {
     email: 'bob@rebus.industries',
     googleSub: 'google-sub-bob',
     displayName: 'Bob Viewer',
+    roleId: 'viewer',
+    roleIds: ['viewer'],
     role: 'viewer',
   },
 };
@@ -68,5 +73,19 @@ export class MockPortalAdapter implements PortalAdapter {
       };
     }
     return { ...projects, fetchedAt: new Date().toISOString() };
+  }
+
+  async listRoles(): Promise<PortalRolesResponse> {
+    // Ids mirror the real portal convention (super-admin = SUPER_ADMIN_ROLE_ID).
+    return {
+      roles: [
+        { id: 'super-admin', name: 'Super Admin', system: true },
+        { id: 'admin', name: 'Admin', system: true },
+        { id: 'staff', name: 'Staff', system: true },
+        { id: 'viewer', name: 'Viewer', system: true },
+      ],
+      supported: true,
+      fetchedAt: new Date().toISOString(),
+    };
   }
 }
