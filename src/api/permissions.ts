@@ -20,11 +20,26 @@ import {
   policySettings,
 } from '../db/schema.js';
 import { loadPolicyGraph } from '../access/manifest.js';
+import type { PortalAdapter } from '../portal/adapter.js';
+import type { PortalRolesResponse } from '../contracts/portal-access.js';
 
-export async function registerPermissionsRoutes(app: FastifyInstance) {
+export async function registerPermissionsRoutes(app: FastifyInstance, portal: PortalAdapter) {
   app.get('/api/permissions/tool-grants', { preHandler: requirePermissionsEditor }, async (): Promise<ToolGrantsResponse> => {
     const grants = await loadToolGrants();
     return { grants, updatedAt: new Date().toISOString() };
+  });
+
+  // Live feed of the portal's current role catalogue. The admin tool-access
+  // page renders role nodes from this so deleted/renamed portal roles never
+  // linger. Degrades to { supported: false } if the portal call fails or the
+  // portal has not implemented GET /portal/roles yet.
+  app.get('/api/permissions/portal-roles', { preHandler: requirePermissionsEditor }, async (): Promise<PortalRolesResponse> => {
+    try {
+      return await portal.listRoles();
+    } catch (err) {
+      app.log.warn({ err }, 'portal-roles fetch failed');
+      return { roles: [], supported: false, fetchedAt: new Date().toISOString() };
+    }
   });
 
   app.put<{ Body: { grants?: ToolGrants } }>(

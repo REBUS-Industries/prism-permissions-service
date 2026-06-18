@@ -1,6 +1,7 @@
 import type {
   PortalProjectPermission,
   PortalProjectPermissionsResponse,
+  PortalRolesResponse,
   PortalUser,
 } from '../contracts/portal-access.js';
 
@@ -11,6 +12,8 @@ export interface PortalAdapter {
   getMe(portalToken: string): Promise<PortalUser>;
   /** Fetch project permissions for a portal user. */
   getProjectPermissions(portalToken: string, userId: string): Promise<PortalProjectPermissionsResponse>;
+  /** List the portal's current roles (service-to-portal call; no user token). */
+  listRoles(): Promise<PortalRolesResponse>;
 }
 
 export interface PortalAdapterConfig {
@@ -26,6 +29,7 @@ interface CacheEntry<T> {
 
 export class CachedPortalAdapter implements PortalAdapter {
   private permCache = new Map<string, CacheEntry<PortalProjectPermissionsResponse>>();
+  private rolesCache: CacheEntry<PortalRolesResponse> | null = null;
 
   constructor(
     private inner: PortalAdapter,
@@ -46,6 +50,16 @@ export class CachedPortalAdapter implements PortalAdapter {
     if (hit && hit.expiresAt > Date.now()) return hit.value;
     const value = await this.inner.getProjectPermissions(portalToken, userId);
     this.permCache.set(key, { value, expiresAt: Date.now() + this.ttlMs });
+    return value;
+  }
+
+  async listRoles() {
+    // Short TTL: the admin tool-access page polls frequently, but the portal
+    // role list rarely changes, so cache to avoid hammering the portal.
+    const rolesTtl = Math.min(this.ttlMs, 30_000);
+    if (this.rolesCache && this.rolesCache.expiresAt > Date.now()) return this.rolesCache.value;
+    const value = await this.inner.listRoles();
+    this.rolesCache = { value, expiresAt: Date.now() + rolesTtl };
     return value;
   }
 }

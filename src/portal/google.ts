@@ -2,6 +2,7 @@ import { OAuth2Client } from 'google-auth-library';
 import {
   PORTAL_ACCESS_SCHEMA,
   type PortalProjectPermissionsResponse,
+  type PortalRolesResponse,
   type PortalUser,
 } from '../contracts/portal-access.js';
 import { getIntegrationSetting } from '../config/integrationSettings.js';
@@ -57,5 +58,11 @@ export class GooglePortalAdapter implements PortalAdapter {
       projects: [],
       fetchedAt: new Date().toISOString(),
     };
+  }
+
+  async listRoles(): Promise<PortalRolesResponse> {
+    // Direct Google Workspace OAuth has no PRISM role catalogue; PRISM falls
+    // back to deriving role nodes from existing tool grants.
+    return { roles: [], supported: false, fetchedAt: new Date().toISOString() };
   }
 }

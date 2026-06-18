@@ -23,26 +23,53 @@ export const CONNECTOR_FUNCTIONS: ConnectorFunction[] = [
   'create_version',
 ];
 
+export type PortalProjectLevel = 'viewer' | 'contributor' | 'owner' | 'admin';
+
+/** PRISM admin tools gated by role-based grants. */
 export type PrismTool = 'convert' | 'visualiser' | 'fixtures' | 'materials' | 'models';
 
-export const PRISM_TOOLS: PrismTool[] = [
-  'convert',
-  'visualiser',
-  'fixtures',
-  'materials',
-  'models',
-];
+export const PRISM_TOOLS: PrismTool[] = ['convert', 'visualiser', 'fixtures', 'materials', 'models'];
 
+/** Portal system role (from portal-app UserProfile.role). */
 export type PortalSystemRole = 'superAdmin' | 'admin' | 'staff' | 'viewer';
-export type PortalProjectLevel = 'viewer' | 'contributor' | 'owner' | 'admin';
 
 export interface PortalUser {
   userId: string;
   email: string;
   googleSub?: string | null;
   displayName?: string | null;
+  /**
+   * The user's primary role id (portal `GET /portal/me.roleId`). Canonical key
+   * matched against PortalRole.id and tool-grant keys.
+   */
+  roleId?: string | null;
+  /** All role ids the user holds (portal `GET /portal/me.roleIds`). */
+  roleIds?: string[] | null;
+  /** @deprecated Legacy portal system role name; superseded by roleId. */
   role?: PortalSystemRole | string | null;
+  /** @deprecated Legacy custom role id; superseded by roleId/roleIds. */
   customRoleId?: string | null;
+}
+
+/**
+ * A role defined in the portal. The live source of truth for role ids; PRISM
+ * mirrors it so deleted/renamed portal roles never linger as stale grants.
+ */
+export interface PortalRole {
+  /** Canonical role id matched against PortalUser.role / customRoleId and tool-grant keys. */
+  id: string;
+  /** Human-readable label (defaults to id). */
+  name?: string | null;
+  /** True for built-in portal system roles (superAdmin / admin / staff / viewer). */
+  system?: boolean;
+}
+
+/** GET /api/permissions/portal-roles — the portal's current role catalogue. */
+export interface PortalRolesResponse {
+  roles: PortalRole[];
+  /** False when the portal has not implemented `GET /portal/roles` yet. */
+  supported: boolean;
+  fetchedAt: string;
 }
 
 export interface PortalProjectPermission {
@@ -158,6 +185,7 @@ export interface PortalAdapter {
   exchangeAuthCode(code: string, redirectUri?: string): Promise<string>;
   getMe(portalToken: string): Promise<PortalUser>;
   getProjectPermissions(portalToken: string, userId: string): Promise<PortalProjectPermissionsResponse>;
+  listRoles(): Promise<PortalRolesResponse>;
 }
 
 export type GoogleWorkspaceStatus = 'disconnected' | 'linked' | 'syncing';

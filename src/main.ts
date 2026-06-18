@@ -47,7 +47,7 @@ async function buildApp() {
   app.get('/health', async () => ({ status: 'ok', service: 'prism-permissions' }));
 
   await registerAccessRoutes(app, portal);
-  await registerPermissionsRoutes(app);
+  await registerPermissionsRoutes(app, portal);
   await registerWorkspaceRoutes(app);
 
   return app;
