@@ -45,6 +45,10 @@ GET /api/access/mock-login?redirect_uri=http://localhost:29364/&persona=alice
 POST /api/access/session { "portalAuthCode": "mock:alice" }
 ```
 
+## Docs
+
+- [`docs/PORTAL_PRISM_INTEGRATION.md`](docs/PORTAL_PRISM_INTEGRATION.md) — portal dev handoff: OAuth, service API key, endpoints, acceptance tests
+
 ## Repo setup
 
 Push this scaffold to `REBUS-Industries/prism-permissions-service` on branch `main`.
