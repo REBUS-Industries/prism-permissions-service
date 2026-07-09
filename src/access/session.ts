@@ -21,16 +21,14 @@ import type { PortalAdapter } from '../portal/adapter.js';
 import { buildConnectorManifest, collectEffectiveFunctions } from './manifest.js';
 import { resolveProvisionedAccess, recordProvisionedLogin } from '../workspace/service.js';
 import { getIntegrationSettingOr } from '../config/integrationSettings.js';
+import {
+  extractInviteKeyFromSessionRequest,
+  lookupRedeemableInviteKey,
+  recordInviteKeyRedemption,
+} from './inviteKeys.js';
+import { AccessError } from './errors.js';
 
-export class AccessError extends Error {
-  constructor(
-    message: string,
-    public status = 400,
-  ) {
-    super(message);
-    this.name = 'AccessError';
-  }
-}
+export { AccessError };
 
 function toAccessError(err: unknown, fallback: string, status = 500): AccessError {
   if (err instanceof AccessError) return err;
@@ -149,6 +147,7 @@ async function persistAccessSession(input: {
   orbitTarget: OrbitTarget;
   manifest: Awaited<ReturnType<typeof buildConnectorManifest>>;
   expiresAt: Date;
+  inviteKeyId?: string | null;
   mintRow: {
     orbitUserId: string;
     email: string;
@@ -182,6 +181,7 @@ async function persistAccessSession(input: {
     manifest: input.manifest,
     expiresAt: input.expiresAt,
     createdAt: now,
+    inviteKeyId: input.inviteKeyId ?? null,
   });
 }
 
@@ -203,6 +203,10 @@ async function tryMintOrbitToken(input: {
   projects: PortalProjectPermission[];
   sessionId: string;
   blanket: boolean;
+  /** When set, mint scopes from these functions instead of level-derived ones. */
+  fixedFunctions?: import('../contracts/portal-access.js').ConnectorFunction[];
+  /** Invite keys must never receive the admin PAT fallback. */
+  forbidAdminFallback?: boolean;
 }): Promise<{ orbitToken: string; orbitUserId: string; scopes: string[]; projectIds: string[] } | null> {
   let creds;
   try {
@@ -218,7 +222,7 @@ async function tryMintOrbitToken(input: {
     // ORBIT lookup is best-effort — PRISM login must still succeed.
   }
 
-  if (!orbitUser && process.env.ORBIT_AUTO_INVITE === '1') {
+  if (!orbitUser && process.env.ORBIT_AUTO_INVITE === '1' && !input.forbidAdminFallback) {
     try {
       orbitUser = await inviteOrbitUser(
         creds,
@@ -232,9 +236,11 @@ async function tryMintOrbitToken(input: {
 
   const orbitUserId = orbitUser?.id ?? `portal:${input.portalUser.userId}`;
   const projectIds = input.blanket ? [] : input.projects.map((p) => p.orbitProjectId);
-  const functions = input.blanket
-    ? [...CONNECTOR_FUNCTIONS]
-    : ([...new Set(graphFunctionsForProjects(input.projects))] as typeof CONNECTOR_FUNCTIONS);
+  const functions = input.fixedFunctions?.length
+    ? input.fixedFunctions
+    : input.blanket
+      ? [...CONNECTOR_FUNCTIONS]
+      : ([...new Set(graphFunctionsForProjects(input.projects))] as typeof CONNECTOR_FUNCTIONS);
 
   try {
     const minted = await mintScopedOrbitToken({
@@ -244,6 +250,7 @@ async function tryMintOrbitToken(input: {
       projectIds,
       functions,
       sessionId: input.sessionId,
+      forbidAdminFallback: input.forbidAdminFallback,
     });
     return {
       orbitToken: minted.token,
@@ -256,10 +263,104 @@ async function tryMintOrbitToken(input: {
   }
 }
 
+/**
+ * Collaborator invite-key session: no portal user, no blanket access.
+ * Identity is attributed as invite:<keyId> for audit.
+ */
+export async function exchangeInviteKeySession(body: AccessSessionRequest & { inviteKey: string }) {
+  const key = await lookupRedeemableInviteKey(body.inviteKey);
+  const orbitTarget: OrbitTarget = body.orbitTarget ?? key.orbitTarget;
+  if (body.orbitTarget && body.orbitTarget !== key.orbitTarget) {
+    throw new AccessError(
+      `Invite key is bound to orbitTarget=${key.orbitTarget}`,
+      400,
+    );
+  }
+
+  const projects: PortalProjectPermission[] = key.orbitProjectIds.map((orbitProjectId) => ({
+    orbitProjectId,
+    level: 'contributor' as const,
+    projectName: key.projectNames[orbitProjectId] ?? null,
+  }));
+
+  const sessionId = randomUUID();
+  const expiresAt = sessionExpiry();
+  const orbitServerUrl = resolveOrbitServerUrl(orbitTarget);
+  const syntheticUser = {
+    userId: `invite:${key.id}`,
+    email: `invite+${key.id}@invite.prism.local`,
+    displayName: `Invite ${key.id.slice(0, 8)}`,
+  };
+  const orbitUserId = `invite:${key.id}`;
+
+  const linkId = await upsertIdentityLink(syntheticUser, orbitUserId);
+  await cacheProjectPermissions(orbitUserId, projects);
+
+  const minted = await tryMintOrbitToken({
+    orbitTarget,
+    portalUser: syntheticUser,
+    projects,
+    sessionId,
+    blanket: false,
+    fixedFunctions: key.allowedFunctions,
+    forbidAdminFallback: true,
+  });
+
+  const manifest = await buildConnectorManifest({
+    sessionId,
+    orbitTarget,
+    orbitServerUrl,
+    orbitToken: minted?.orbitToken ?? '',
+    expiresAt,
+    portalUser: syntheticUser,
+    portalProjects: projects,
+    roleRefs: [],
+    orbitBlanketAccess: false,
+    prismAccessToken: sessionId,
+    fixedAllowedFunctions: key.allowedFunctions,
+    authMethod: 'invite_key',
+    inviteKeyId: key.id,
+  });
+
+  await persistAccessSession({
+    sessionId,
+    linkId,
+    orbitTarget,
+    manifest,
+    expiresAt,
+    inviteKeyId: key.id,
+    mintRow: {
+      orbitUserId: minted?.orbitUserId ?? orbitUserId,
+      email: syntheticUser.email,
+      projectIds: minted?.projectIds ?? projects.map((p) => p.orbitProjectId),
+      scopes: minted?.scopes ?? [],
+      tokenPrefix: minted?.orbitToken ? minted.orbitToken.slice(0, 8) : 'prism-only',
+    },
+  });
+
+  await recordInviteKeyRedemption({
+    inviteKeyId: key.id,
+    sessionId,
+    orbitTarget,
+    clientMeta: { redirectUri: body.redirectUri ?? null, createdBy: key.createdBy },
+  });
+
+  return { manifest, effectiveFunctions: collectEffectiveFunctions(manifest) };
+}
+
 export async function exchangePortalSession(
   portal: PortalAdapter,
   body: AccessSessionRequest,
 ) {
+  const inviteKeyPlain = extractInviteKeyFromSessionRequest(body);
+  if (inviteKeyPlain) {
+    return exchangeInviteKeySession({ ...body, inviteKey: inviteKeyPlain });
+  }
+
+  if (!body.portalAuthCode) {
+    throw new AccessError('portalAuthCode or inviteKey required', 400);
+  }
+
   const orbitTarget: OrbitTarget = body.orbitTarget ?? 'prod';
   let portalToken: string;
   try {
@@ -309,6 +410,7 @@ export async function exchangePortalSession(
     roleRefs,
     orbitBlanketAccess: blanket,
     prismAccessToken: sessionId,
+    authMethod: 'portal',
   });
 
   await persistAccessSession({

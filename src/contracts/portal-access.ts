@@ -85,10 +85,87 @@ export interface PortalProjectPermissionsResponse {
   fetchedAt: string;
 }
 
+/**
+ * Exchange a portal OAuth code **or** a collaborator invite key for a
+ * ConnectorManifest. Exactly one of `portalAuthCode` / `inviteKey` is required.
+ * Codes of the form `invite:<key>` (from GET /api/access/invite-login) are
+ * treated as invite keys.
+ */
 export interface AccessSessionRequest {
-  portalAuthCode: string;
+  portalAuthCode?: string;
+  /** Collaborator login key (plaintext). Prefer this over encoding in portalAuthCode. */
+  inviteKey?: string;
   orbitTarget?: 'prod' | 'dev';
   redirectUri?: string;
+}
+
+/** Default REBUS Connector Light function set for invite keys. */
+export const LIGHT_CONNECTOR_FUNCTIONS: ConnectorFunction[] = [
+  'send',
+  'create_model',
+  'create_version',
+  'list_models',
+  'list_versions',
+];
+
+/** Functions that invite keys must never grant. */
+export const INVITE_KEY_DENIED_FUNCTIONS: ConnectorFunction[] = [
+  'receive',
+  'create_project',
+];
+
+export type InviteKeyAuthMethod = 'portal' | 'invite_key';
+
+export interface InviteKeyProject {
+  orbitProjectId: string;
+  projectName?: string | null;
+}
+
+export interface CreateInviteKeyRequest {
+  orbitProjectIds: string[];
+  /** Defaults to LIGHT_CONNECTOR_FUNCTIONS. Must not include receive/create_project. */
+  allowedFunctions?: ConnectorFunction[];
+  orbitTarget?: 'prod' | 'dev';
+  expiresAt?: string | null;
+  label?: string | null;
+  /** Null/omit = unlimited. */
+  maxRedemptions?: number | null;
+  /** Optional display names keyed by project id (or parallel list via projects). */
+  projectNames?: Record<string, string> | null;
+}
+
+export interface InviteKeyRecord {
+  id: string;
+  label?: string | null;
+  orbitTarget: 'prod' | 'dev';
+  projects: InviteKeyProject[];
+  allowedFunctions: ConnectorFunction[];
+  expiresAt?: string | null;
+  maxRedemptions?: number | null;
+  redemptionCount: number;
+  createdBy: string;
+  createdAt: string;
+  revokedAt?: string | null;
+  lastRedeemedAt?: string | null;
+  /** Present only on create — plaintext key shown once. */
+  key?: string;
+  /** Present only on create. */
+  redeemUrl?: string;
+}
+
+export interface CreateInviteKeyResponse {
+  id: string;
+  key: string;
+  redeemUrl: string;
+  expiresAt?: string | null;
+  projects: InviteKeyProject[];
+  allowedFunctions: ConnectorFunction[];
+  label?: string | null;
+  maxRedemptions?: number | null;
+}
+
+export interface ListInviteKeysResponse {
+  keys: InviteKeyRecord[];
 }
 
 export interface ConnectorManifestProject {
@@ -112,6 +189,10 @@ export interface ConnectorManifest {
   orbitBlanketAccess: boolean;
   projects: ConnectorManifestProject[];
   globalAllowedFunctions: ConnectorFunction[];
+  /** How this session was authenticated. Omit/portal for Google/portal OAuth. */
+  authMethod?: InviteKeyAuthMethod;
+  /** Present when authMethod is invite_key — for audit / connector attribution. */
+  inviteKeyId?: string;
 }
 
 export interface AccessSessionResponse {

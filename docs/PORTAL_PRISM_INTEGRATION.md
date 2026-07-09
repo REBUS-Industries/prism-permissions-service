@@ -432,3 +432,18 @@ Canonical TypeScript types: `shared/contracts/portal-access.ts` in the [PRISM mo
 | Portal redirect back to PRISM | ❌ Not happening after Google login |
 | `POST /portal/oauth/token` | ⚠️ Reachable; returns `401 invalid service key` without valid key |
 | Direct Google OAuth (`portal_adapter=google`) | ✅ Works as interim workaround; bypasses portal for login only — permissions would not come from portal |
+
+---
+
+## Appendix B: Collaborator invite keys (Connector Light)
+
+External Rhino users can authenticate with an **invite key** instead of Google/portal
+OAuth. See [INVITE_KEYS.md](./INVITE_KEYS.md) for the full contract.
+
+Summary for portal/connector teams:
+
+- Admin: `POST/GET /api/access/invite-keys`, `POST /api/access/invite-keys/:id/revoke`
+- Connector: `POST /api/access/session` with `{ inviteKey }` (or `portalAuthCode: "invite:…"`)
+- Manifest always has `orbitBlanketAccess: false`, `authMethod: "invite_key"`, and
+  project-scoped Light functions (no `receive` / `create_project`)
+- Mock demo key: `invite_demo_light_mock-project-1` → `mock-project-1`

@@ -101,10 +101,18 @@ export async function buildConnectorManifest(input: {
   orbitBlanketAccess?: boolean;
   /** PRISM portal session bearer for Library/API. */
   prismAccessToken?: string;
+  /**
+   * When set, every project gets exactly these functions (invite keys).
+   * Skips the policy graph. Must never be used with orbitBlanketAccess=true.
+   */
+  fixedAllowedFunctions?: ConnectorFunction[];
+  authMethod?: 'portal' | 'invite_key';
+  inviteKeyId?: string;
 }): Promise<ConnectorManifest> {
   const graph = await loadPolicyGraph();
   const roleRefs = input.roleRefs ?? [];
   const blanket = input.orbitBlanketAccess === true;
+  const fixed = input.fixedAllowedFunctions;
 
   // Phase 2: per-project entries when blanket is off and projects are provisioned.
   const projects: ConnectorManifestProject[] = blanket
@@ -113,9 +121,11 @@ export async function buildConnectorManifest(input: {
         orbitProjectId: p.orbitProjectId,
         projectName: p.projectName,
         level: p.level,
-        allowedFunctions: input.orbitToken
-          ? grantsFromGraph(graph, input.portalUser, p, roleRefs)
-          : [],
+        allowedFunctions: fixed
+          ? [...fixed]
+          : input.orbitToken
+            ? grantsFromGraph(graph, input.portalUser, p, roleRefs)
+            : [],
       }));
 
   return {
@@ -133,9 +143,13 @@ export async function buildConnectorManifest(input: {
     projects,
     globalAllowedFunctions: blanket
       ? [...CONNECTOR_FUNCTIONS]
-      : input.orbitToken
-        ? graph.defaultFunctions
-        : [],
+      : fixed
+        ? []
+        : input.orbitToken
+          ? graph.defaultFunctions
+          : [],
+    ...(input.authMethod ? { authMethod: input.authMethod } : {}),
+    ...(input.inviteKeyId ? { inviteKeyId: input.inviteKeyId } : {}),
   };
 }
 
