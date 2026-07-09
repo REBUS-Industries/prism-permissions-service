@@ -4,6 +4,7 @@ import {
   timestamp,
   jsonb,
   boolean,
+  integer,
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
@@ -89,8 +90,56 @@ export const accessSession = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    /** Set when the session was minted from a collaborator invite key. */
+    inviteKeyId: text('invite_key_id'),
   },
-  (t) => [index('access_session_identity_idx').on(t.identityLinkId)],
+  (t) => [
+    index('access_session_identity_idx').on(t.identityLinkId),
+    index('access_session_invite_key_idx').on(t.inviteKeyId),
+  ],
+);
+
+export const inviteKey = pgTable(
+  'invite_key',
+  {
+    id: text('id').primaryKey(),
+    keyHash: text('key_hash').notNull(),
+    keyPrefix: text('key_prefix').notNull(),
+    label: text('label'),
+    orbitTarget: text('orbit_target').notNull(),
+    orbitProjectIds: jsonb('orbit_project_ids').$type<string[]>().notNull(),
+    projectNames: jsonb('project_names').$type<Record<string, string>>().notNull().default({}),
+    allowedFunctions: jsonb('allowed_functions').$type<string[]>().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    maxRedemptions: integer('max_redemptions'),
+    redemptionCount: integer('redemption_count').notNull().default(0),
+    createdBy: text('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    lastRedeemedAt: timestamp('last_redeemed_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('invite_key_hash_idx').on(t.keyHash),
+    index('invite_key_created_by_idx').on(t.createdBy),
+  ],
+);
+
+export const inviteKeyRedemption = pgTable(
+  'invite_key_redemption',
+  {
+    id: text('id').primaryKey(),
+    inviteKeyId: text('invite_key_id')
+      .notNull()
+      .references(() => inviteKey.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    orbitTarget: text('orbit_target').notNull(),
+    redeemedAt: timestamp('redeemed_at', { withTimezone: true }).defaultNow().notNull(),
+    clientMeta: jsonb('client_meta').$type<Record<string, unknown>>(),
+  },
+  (t) => [
+    index('invite_key_redemption_key_idx').on(t.inviteKeyId),
+    index('invite_key_redemption_session_idx').on(t.sessionId),
+  ],
 );
 
 export const policySettings = pgTable('policy_settings', {

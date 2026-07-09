@@ -1,10 +1,23 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { PortalAdapter } from '../portal/adapter.js';
-import type { AccessSessionRequest, PrismTool, ToolAuthorizeRequest } from '../contracts/portal-access.js';
+import type {
+  AccessSessionRequest,
+  CreateInviteKeyRequest,
+  PrismTool,
+  ToolAuthorizeRequest,
+} from '../contracts/portal-access.js';
 import { AccessError, exchangePortalSession, getSessionManifest, revokeSession } from '../access/session.js';
+import {
+  createInviteKey,
+  DEMO_INVITE_KEY,
+  listInviteKeys,
+  lookupRedeemableInviteKey,
+  revokeInviteKey,
+} from '../access/inviteKeys.js';
 import { resolvePortalUser } from '../access/portalUser.js';
 import { authorizeTool, fullLocalAdminToolAccess, resolveEmailFromAdminUsername, resolveToolAccess } from '../access/tools.js';
 import { checkProvisionedAdmin } from '../workspace/service.js';
+import { adminUsername, requireAdmin } from '../auth/adminSession.js';
 import { requireInternalServiceKey } from '../auth/permissionsEditor.js';
 import { getIntegrationSetting, getIntegrationSettingOr } from '../config/integrationSettings.js';
 
@@ -168,8 +181,8 @@ export async function registerAccessRoutes(app: FastifyInstance, portal: PortalA
   app.post<{ Body: AccessSessionRequest }>('/api/access/session', async (req, reply) => {
     try {
       const body = req.body ?? ({} as AccessSessionRequest);
-      if (!body.portalAuthCode) {
-        return reply.status(400).send({ error: 'portalAuthCode required' });
+      if (!body.portalAuthCode && !body.inviteKey) {
+        return reply.status(400).send({ error: 'portalAuthCode or inviteKey required' });
       }
       const result = await exchangePortalSession(portal, body);
       return { manifest: result.manifest };
@@ -181,6 +194,85 @@ export async function registerAccessRoutes(app: FastifyInstance, portal: PortalA
       const message = err instanceof Error ? err.message : 'Session exchange failed';
       return reply.status(500).send({ error: message });
     }
+  });
+
+  /**
+   * Browser redeem for Connector Light (parity with portal OAuth loopback).
+   * Redirects to redirect_uri?code=invite:<key> so the connector can POST /session.
+   */
+  app.get<{ Querystring: { key?: string; redirect_uri?: string } }>(
+    '/api/access/invite-login',
+    async (req, reply) => {
+      const key = req.query.key?.trim();
+      const redirectUri = req.query.redirect_uri?.trim();
+      if (!key) return reply.status(400).send({ error: 'key required' });
+      if (!redirectUri) return reply.status(400).send({ error: 'redirect_uri required' });
+      try {
+        // Validate before redirect so bad keys fail here, not after loopback.
+        await lookupRedeemableInviteKey(key);
+      } catch (err) {
+        if (err instanceof AccessError) {
+          return reply.status(err.status).send({ error: err.message });
+        }
+        throw err;
+      }
+      const url = new URL(redirectUri);
+      url.searchParams.set('code', `invite:${key}`);
+      return reply.redirect(url.toString());
+    },
+  );
+
+  await app.register(async (adminRoutes) => {
+    adminRoutes.addHook('preHandler', requireAdmin);
+
+    adminRoutes.post<{ Body: CreateInviteKeyRequest }>('/api/access/invite-keys', async (req, reply) => {
+      try {
+        const createdBy = adminUsername(req) ?? 'admin';
+        const result = await createInviteKey(req.body ?? {}, createdBy, publicBaseUrl(req));
+        return result;
+      } catch (err) {
+        if (err instanceof AccessError) {
+          return reply.status(err.status).send({ error: err.message });
+        }
+        req.log.error(err);
+        return reply.status(500).send({ error: 'Failed to create invite key' });
+      }
+    });
+
+    adminRoutes.get('/api/access/invite-keys', async () => {
+      return { keys: await listInviteKeys() };
+    });
+
+    adminRoutes.post<{ Params: { id: string } }>(
+      '/api/access/invite-keys/:id/revoke',
+      async (req, reply) => {
+        try {
+          const key = await revokeInviteKey(req.params.id);
+          return { key };
+        } catch (err) {
+          if (err instanceof AccessError) {
+            return reply.status(err.status).send({ error: err.message });
+          }
+          req.log.error(err);
+          return reply.status(500).send({ error: 'Failed to revoke invite key' });
+        }
+      },
+    );
+  });
+
+  /** Dev helper: echo the seeded demo invite key when mock adapter is active. */
+  app.get('/api/access/invite-keys/demo', async (req, reply) => {
+    const adapter = (await getIntegrationSettingOr('portal_adapter', 'mock')).toLowerCase();
+    if (process.env.NODE_ENV === 'production' && adapter !== 'mock') {
+      return reply.status(404).send({ error: 'Not found' });
+    }
+    return {
+      id: 'invite-demo-light',
+      key: DEMO_INVITE_KEY,
+      orbitProjectId: 'mock-project-1',
+      allowedFunctions: ['send', 'create_model', 'create_version', 'list_models', 'list_versions'],
+      note: 'Seeded demo key for REBUS Connector Light testing (mock adapter).',
+    };
   });
 
   app.get<{ Querystring: { sessionId?: string } }>('/api/access/manifest', async (req, reply) => {

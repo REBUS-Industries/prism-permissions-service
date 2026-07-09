@@ -6,7 +6,12 @@ Portal-brokered access + node-based connector permissions for PRISM/ORBIT.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/access/session` | — | Exchange portal OAuth code → `{ manifest }` |
+| POST | `/api/access/session` | — | Exchange portal OAuth code **or** invite key → `{ manifest }` |
+| GET | `/api/access/invite-login` | — | Browser redeem → `redirect_uri?code=invite:…` |
+| POST | `/api/access/invite-keys` | admin cookie | Create collaborator invite key |
+| GET | `/api/access/invite-keys` | admin cookie | List invite keys |
+| POST | `/api/access/invite-keys/:id/revoke` | admin cookie | Revoke key + derived sessions |
+| GET | `/api/access/invite-keys/demo` | — | Echo seeded mock demo key (mock adapter) |
 | POST | `/api/access/portal-user` | — | Validate portal OAuth code → `{ user }` (admin Google login) |
 | GET | `/api/access/manifest?sessionId=` | — | Refresh manifest for session |
 | GET | `/api/access/mock-login` | — | Dev mock portal redirect (mock adapter only) |
@@ -45,9 +50,31 @@ GET /api/access/mock-login?redirect_uri=http://localhost:29364/&persona=alice
 POST /api/access/session { "portalAuthCode": "mock:alice" }
 ```
 
+## Invite keys (Connector Light)
+
+See [docs/INVITE_KEYS.md](docs/INVITE_KEYS.md).
+
+```
+# Admin creates a key (admin cookie required)
+POST /api/access/invite-keys
+{ "orbitProjectIds": ["mock-project-1"], "orbitTarget": "dev" }
+
+# Collaborator redeems
+POST /api/access/session
+{ "inviteKey": "invite_…", "orbitTarget": "dev" }
+
+# Or browser loopback
+GET /api/access/invite-login?key=invite_…&redirect_uri=http://localhost:29364/
+
+# Seeded mock demo key
+GET /api/access/invite-keys/demo
+→ { "key": "invite_demo_light_mock-project-1", … }
+```
+
 ## Docs
 
 - [`docs/PORTAL_PRISM_INTEGRATION.md`](docs/PORTAL_PRISM_INTEGRATION.md) — portal dev handoff: OAuth, service API key, endpoints, acceptance tests
+- [`docs/INVITE_KEYS.md`](docs/INVITE_KEYS.md) — collaborator invite keys for REBUS Connector Light
 
 ## Repo setup
 

@@ -10,6 +10,11 @@ export interface MintTokenInput {
   functions: ConnectorFunction[];
   sessionId: string;
   lifespanSeconds?: number;
+  /**
+   * When true, never fall back to the admin PAT. Required for invite keys so
+   * Orbit ACL (limitResources + scopes) is always enforced server-side.
+   */
+  forbidAdminFallback?: boolean;
 }
 
 export interface MintTokenResult {
@@ -68,8 +73,9 @@ export async function mintScopedOrbitToken(input: MintTokenInput): Promise<MintT
       projectIds: input.projectIds,
     };
   } catch (err) {
-    if (process.env.ORBIT_MINT_FALLBACK === '0') throw err;
-    // Fallback: return admin token — manifest still gates UI; ORBIT ACL applies per user lookup on invite path.
+    if (input.forbidAdminFallback || process.env.ORBIT_MINT_FALLBACK === '0') throw err;
+    // Fallback: return admin token — manifest still gates UI for portal users.
+    // Invite keys must set forbidAdminFallback so Orbit ACL is never bypassed.
     // Production should enable apiTokenCreate on orbit-server or set ORBIT_MINT_FALLBACK=0.
     return {
       token: creds.token,
