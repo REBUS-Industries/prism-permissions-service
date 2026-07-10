@@ -105,7 +105,7 @@ async function gqlMint(
     projectIds: string[];
     userId?: string;
   },
-) {
+): Promise<{ id: string; token: string }> {
   const token: Record<string, unknown> = {
     name: input.name,
     scopes: input.scopes,
@@ -117,6 +117,7 @@ async function gqlMint(
   // Omit userId to mint for the authenticated admin (service principal).
   if (input.userId) token.userId = input.userId;
 
+  // Orbit/Speckle: apiTokenCreate returns String! (the raw token), not an object.
   const res = await fetch(`${creds.url}/graphql`, {
     method: 'POST',
     headers: {
@@ -125,24 +126,34 @@ async function gqlMint(
     },
     body: JSON.stringify({
       query: `mutation($token: ApiTokenCreateInput!) {
-        apiTokenCreate(token: $token) {
-          id
-          token
-        }
+        apiTokenCreate(token: $token)
       }`,
       variables: { token },
     }),
   });
   const body = (await res.json()) as {
-    data?: { apiTokenCreate?: { id: string; token: string } };
+    data?: { apiTokenCreate?: string | { id?: string; token?: string } | null };
     errors?: { message: string }[];
   };
-  if (!res.ok || body.errors?.length || !body.data?.apiTokenCreate?.token) {
+  if (!res.ok || body.errors?.length) {
     throw new OrbitClientError(
       res.status,
       body.errors?.[0]?.message ?? 'apiTokenCreate unavailable',
       body.errors,
     );
   }
-  return body.data.apiTokenCreate;
+
+  const created = body.data?.apiTokenCreate;
+  const tokenValue =
+    typeof created === 'string'
+      ? created
+      : created && typeof created === 'object'
+        ? created.token
+        : undefined;
+  if (!tokenValue) {
+    throw new OrbitClientError(res.status, 'apiTokenCreate returned empty token', body);
+  }
+  const id =
+    typeof created === 'object' && created?.id ? created.id : randomUUID();
+  return { id, token: tokenValue };
 }
