@@ -112,7 +112,7 @@ async function gqlMint(
     lifespan: input.lifespan,
   };
   if (input.projectIds.length > 0) {
-    token.limitResources = input.projectIds.map((id) => ({ id, type: 'Project' }));
+    token.limitResources = input.projectIds.map((id) => ({ id, type: 'project' }));
   }
   // Omit userId to mint for the authenticated admin (service principal).
   if (input.userId) token.userId = input.userId;
