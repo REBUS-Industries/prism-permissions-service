@@ -5,6 +5,7 @@ import type {
   CreateInviteKeyRequest,
   PrismTool,
   ToolAuthorizeRequest,
+  UpdateInviteKeyRequest,
 } from '../contracts/portal-access.js';
 import { AccessError, exchangePortalSession, getSessionManifest, revokeSession } from '../access/session.js';
 import {
@@ -13,6 +14,7 @@ import {
   listInviteKeys,
   lookupRedeemableInviteKey,
   revokeInviteKey,
+  updateInviteKey,
 } from '../access/inviteKeys.js';
 import { resolvePortalUser } from '../access/portalUser.js';
 import { authorizeTool, fullLocalAdminToolAccess, resolveEmailFromAdminUsername, resolveToolAccess } from '../access/tools.js';
@@ -222,10 +224,12 @@ export async function registerAccessRoutes(app: FastifyInstance, portal: PortalA
     },
   );
 
-  await app.register(async (adminRoutes) => {
-    adminRoutes.addHook('preHandler', requireAdmin);
-
-    adminRoutes.post<{ Body: CreateInviteKeyRequest }>('/api/access/invite-keys', async (req, reply) => {
+  // Register on `app` (not a nested plugin) so routes always appear in the
+  // root router — nested register has been observed missing after some deploys.
+  app.post<{ Body: CreateInviteKeyRequest }>(
+    '/api/access/invite-keys',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
       try {
         const createdBy = adminUsername(req) ?? 'admin';
         const result = await createInviteKey(req.body ?? {}, createdBy, publicBaseUrl(req));
@@ -237,28 +241,46 @@ export async function registerAccessRoutes(app: FastifyInstance, portal: PortalA
         req.log.error(err);
         return reply.status(500).send({ error: 'Failed to create invite key' });
       }
-    });
+    },
+  );
 
-    adminRoutes.get('/api/access/invite-keys', async () => {
-      return { keys: await listInviteKeys() };
-    });
-
-    adminRoutes.post<{ Params: { id: string } }>(
-      '/api/access/invite-keys/:id/revoke',
-      async (req, reply) => {
-        try {
-          const key = await revokeInviteKey(req.params.id);
-          return { key };
-        } catch (err) {
-          if (err instanceof AccessError) {
-            return reply.status(err.status).send({ error: err.message });
-          }
-          req.log.error(err);
-          return reply.status(500).send({ error: 'Failed to revoke invite key' });
-        }
-      },
-    );
+  app.get('/api/access/invite-keys', { preHandler: requireAdmin }, async () => {
+    return { keys: await listInviteKeys() };
   });
+
+  app.patch<{ Params: { id: string }; Body: UpdateInviteKeyRequest }>(
+    '/api/access/invite-keys/:id',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      try {
+        const key = await updateInviteKey(req.params.id, req.body ?? {});
+        return { key };
+      } catch (err) {
+        if (err instanceof AccessError) {
+          return reply.status(err.status).send({ error: err.message });
+        }
+        req.log.error(err);
+        return reply.status(500).send({ error: 'Failed to update invite key' });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/access/invite-keys/:id/revoke',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      try {
+        const key = await revokeInviteKey(req.params.id);
+        return { key };
+      } catch (err) {
+        if (err instanceof AccessError) {
+          return reply.status(err.status).send({ error: err.message });
+        }
+        req.log.error(err);
+        return reply.status(500).send({ error: 'Failed to revoke invite key' });
+      }
+    },
+  );
 
   /** Dev helper: echo the seeded demo invite key when mock adapter is active. */
   app.get('/api/access/invite-keys/demo', async (req, reply) => {
@@ -300,5 +322,8 @@ export async function registerAccessRoutes(app: FastifyInstance, portal: PortalA
   app.get('/api/access/health', async () => ({
     status: 'ok',
     adapter: await getIntegrationSettingOr('portal_adapter', 'mock'),
+    features: { inviteKeys: true },
+    revision: process.env.GIT_SHA ?? process.env.npm_package_version ?? null,
   }));
 }
+

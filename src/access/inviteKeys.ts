@@ -9,6 +9,7 @@ import {
   type CreateInviteKeyResponse,
   type InviteKeyProject,
   type InviteKeyRecord,
+  type UpdateInviteKeyRequest,
 } from '../contracts/portal-access.js';
 import { hashApiKey } from '../auth/apiKey.js';
 import { getDb } from '../db/client.js';
@@ -150,6 +151,81 @@ export async function listInviteKeys(): Promise<InviteKeyRecord[]> {
   const db = getDb();
   const rows = await db.select().from(inviteKey).orderBy(desc(inviteKey.createdAt));
   return rows.map((r) => toRecord(r));
+}
+
+
+export async function updateInviteKey(id: string, input: UpdateInviteKeyRequest): Promise<InviteKeyRecord> {
+  const db = getDb();
+  const rows = await db.select().from(inviteKey).where(eq(inviteKey.id, id)).limit(1);
+  const row = rows[0];
+  if (!row) throw new AccessError('Invite key not found', 404);
+  if (row.revokedAt) throw new AccessError('Revoked invite keys cannot be edited', 400);
+
+  const patch: Partial<typeof inviteKey.$inferInsert> = {};
+
+  if (input.label !== undefined) {
+    patch.label = input.label?.trim() || null;
+  }
+
+  if (input.orbitProjectIds !== undefined) {
+    const projectIds = [...new Set(input.orbitProjectIds.map((pid) => pid.trim()).filter(Boolean))];
+    if (projectIds.length === 0) {
+      throw new AccessError('orbitProjectIds required', 400);
+    }
+    patch.orbitProjectIds = projectIds;
+    const names: Record<string, string> = { ...(row.projectNames ?? {}) };
+    if (input.projectNames) {
+      for (const [pid, name] of Object.entries(input.projectNames)) {
+        if (projectIds.includes(pid) && name) names[pid] = name;
+      }
+    }
+    for (const pid of Object.keys(names)) {
+      if (!projectIds.includes(pid)) delete names[pid];
+    }
+    patch.projectNames = names;
+  } else if (input.projectNames !== undefined && input.projectNames) {
+    const names = { ...(row.projectNames ?? {}) };
+    for (const [pid, name] of Object.entries(input.projectNames)) {
+      if (row.orbitProjectIds.includes(pid) && name) names[pid] = name;
+    }
+    patch.projectNames = names;
+  }
+
+  if (input.allowedFunctions !== undefined) {
+    patch.allowedFunctions = normalizeInviteFunctions(input.allowedFunctions);
+  }
+
+  if (input.expiresAt !== undefined) {
+    if (input.expiresAt == null || input.expiresAt === '') {
+      patch.expiresAt = null;
+    } else {
+      const expiresAt = new Date(input.expiresAt);
+      if (Number.isNaN(expiresAt.getTime())) {
+        throw new AccessError('expiresAt must be a valid ISO timestamp', 400);
+      }
+      if (expiresAt.getTime() <= Date.now()) {
+        throw new AccessError('expiresAt must be in the future', 400);
+      }
+      patch.expiresAt = expiresAt;
+    }
+  }
+
+  if (input.maxRedemptions !== undefined) {
+    const maxRedemptions =
+      input.maxRedemptions == null ? null : Number(input.maxRedemptions);
+    if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions < 1)) {
+      throw new AccessError('maxRedemptions must be a positive integer', 400);
+    }
+    patch.maxRedemptions = maxRedemptions;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return toRecord(row);
+  }
+
+  await db.update(inviteKey).set(patch).where(eq(inviteKey.id, id));
+  const updated = await db.select().from(inviteKey).where(eq(inviteKey.id, id)).limit(1);
+  return toRecord(updated[0]!);
 }
 
 export async function revokeInviteKey(id: string): Promise<InviteKeyRecord> {
