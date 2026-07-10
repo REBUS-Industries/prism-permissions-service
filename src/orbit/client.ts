@@ -20,6 +20,35 @@ export function getOrbitCreds(target: OrbitTarget): OrbitCreds {
   return { url: url.replace(/\/+$/, ''), token };
 }
 
+/**
+ * Credentials used for apiTokenCreate. Prefers a dedicated mint PAT
+ * (`ORBIT_MINT_TOKEN` / `ORBIT_DEV_MINT_TOKEN`) that has `tokens:write`,
+ * falling back to the admin token.
+ */
+export function getOrbitMintCreds(target: OrbitTarget): OrbitCreds {
+  const base = getOrbitCreds(target);
+  const mintToken =
+    target === 'dev'
+      ? (process.env.ORBIT_DEV_MINT_TOKEN || process.env.ORBIT_MINT_TOKEN || '')
+      : (process.env.ORBIT_MINT_TOKEN || '');
+  if (mintToken.trim()) {
+    return { url: base.url, token: mintToken.trim() };
+  }
+  return base;
+}
+
+/** Human-readable hint when apiTokenCreate fails for missing tokens:write. */
+export function orbitMintScopeHint(errMessage: string): string {
+  if (!/tokens:write/i.test(errMessage)) return errMessage;
+  return (
+    `${errMessage} ` +
+    'Create an Orbit personal access token with the tokens:write scope ' +
+    '(plus streams:read/write and objects:read/write), set it as ORBIT_MINT_TOKEN ' +
+    '(or regenerate ORBIT_ADMIN_TOKEN with tokens:write) on the permissions service, ' +
+    'and restart prism-permissions.'
+  );
+}
+
 /** Resolve ORBIT GraphQL base URL without requiring admin token (for manifest metadata). */
 export function resolveOrbitServerUrl(target: OrbitTarget): string {
   try {

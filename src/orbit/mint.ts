@@ -4,7 +4,7 @@ import {
   OrbitClientError,
   type OrbitCreds,
   type OrbitTarget,
-  getOrbitCreds,
+  getOrbitMintCreds,
 } from './client.js';
 
 export interface MintTokenInput {
@@ -57,7 +57,8 @@ export function functionsToScopes(functions: ConnectorFunction[]): string[] {
  * PAT for portal users unless forbidAdminFallback / ORBIT_MINT_FALLBACK=0.
  */
 export async function mintScopedOrbitToken(input: MintTokenInput): Promise<MintTokenResult> {
-  const creds = getOrbitCreds(input.target);
+  // Prefer ORBIT_MINT_TOKEN (needs tokens:write) over the general admin PAT.
+  const creds = getOrbitMintCreds(input.target);
   const scopes = functionsToScopes(input.functions);
   const lifespan = input.lifespanSeconds ?? Number(process.env.ORBIT_TOKEN_LIFESPAN_SEC ?? 86400);
   const expiresAt = new Date(Date.now() + lifespan * 1000);
@@ -102,7 +103,7 @@ async function gqlMint(
   },
 ): Promise<{ id: string; token: string }> {
   // ApiTokenCreateInput: name, scopes, lifespan, limitResources — no userId.
-  // Token is always owned by the authenticated admin (ORBIT_ADMIN_TOKEN).
+  // Token is always owned by the authenticated mint/admin PAT.
   const token: Record<string, unknown> = {
     name: input.name,
     scopes: input.scopes,
