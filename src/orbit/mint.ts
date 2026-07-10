@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { ConnectorFunction } from '../contracts/portal-access.js';
-import { OrbitClientError, type OrbitCreds, type OrbitTarget, getOrbitCreds } from './client.js';
+import {
+  OrbitClientError,
+  isRealOrbitUserId,
+  type OrbitCreds,
+  type OrbitTarget,
+  getOrbitCreds,
+} from './client.js';
 
 export interface MintTokenInput {
   target: OrbitTarget;
@@ -56,6 +62,9 @@ export async function mintScopedOrbitToken(input: MintTokenInput): Promise<MintT
   const expiresAt = new Date(Date.now() + lifespan * 1000);
   const tokenId = randomUUID();
   const name = `prism-portal:${input.email}:${input.sessionId.slice(0, 8)}`;
+  // Never send synthetic portal:/invite: ids — apiTokenCreate rejects them and
+  // invite sessions previously returned an empty orbitToken as a result.
+  const userId = isRealOrbitUserId(input.orbitUserId) ? input.orbitUserId : undefined;
 
   try {
     const data = await gqlMint(creds, {
@@ -63,7 +72,7 @@ export async function mintScopedOrbitToken(input: MintTokenInput): Promise<MintT
       scopes,
       lifespan,
       projectIds: input.projectIds,
-      userId: input.orbitUserId,
+      userId,
     });
     return {
       token: data.token,
@@ -89,8 +98,25 @@ export async function mintScopedOrbitToken(input: MintTokenInput): Promise<MintT
 
 async function gqlMint(
   creds: OrbitCreds,
-  input: { name: string; scopes: string[]; lifespan: number; projectIds: string[]; userId: string },
+  input: {
+    name: string;
+    scopes: string[];
+    lifespan: number;
+    projectIds: string[];
+    userId?: string;
+  },
 ) {
+  const token: Record<string, unknown> = {
+    name: input.name,
+    scopes: input.scopes,
+    lifespan: input.lifespan,
+  };
+  if (input.projectIds.length > 0) {
+    token.limitResources = input.projectIds.map((id) => ({ id, type: 'Project' }));
+  }
+  // Omit userId to mint for the authenticated admin (service principal).
+  if (input.userId) token.userId = input.userId;
+
   const res = await fetch(`${creds.url}/graphql`, {
     method: 'POST',
     headers: {
@@ -104,15 +130,7 @@ async function gqlMint(
           token
         }
       }`,
-      variables: {
-        token: {
-          name: input.name,
-          scopes: input.scopes,
-          lifespan: input.lifespan,
-          limitResources: input.projectIds.map((id) => ({ id, type: 'Project' })),
-          userId: input.userId,
-        },
-      },
+      variables: { token },
     }),
   });
   const body = (await res.json()) as {
