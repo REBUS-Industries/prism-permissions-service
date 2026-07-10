@@ -19,6 +19,14 @@ test('isRealOrbitUserId rejects synthetic portal/invite placeholders', () => {
   assert.equal(isRealOrbitUserId('a1b2c3d4e5'), true);
 });
 
+test('orbitMintScopeHint explains tokens:write remediation', async () => {
+  const { orbitMintScopeHint } = await import('../orbit/client.js');
+  const hinted = orbitMintScopeHint('Your auth token does not have the required scope: tokens:write.');
+  assert.match(hinted, /ORBIT_MINT_TOKEN/);
+  assert.match(hinted, /tokens:write/);
+  assert.equal(orbitMintScopeHint('other error'), 'other error');
+});
+
 test('useBlanketOrbitAccess defaults to true; env kill-switch forces per-project', async () => {
   const prev = process.env.ORBIT_BLANKET_ACCESS;
   delete process.env.ORBIT_BLANKET_ACCESS;

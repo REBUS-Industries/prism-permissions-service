@@ -46,7 +46,8 @@ pull is 403 for polyrepo packages) and pins `PRISM_PERMISSIONS_TAG` in
 | `PORTAL_API_KEY` | Service-to-portal bearer |
 | `ORBIT_SERVER_URL` | Prod ORBIT GraphQL |
 | `ORBIT_DEV_SERVER_URL` | Dev ORBIT GraphQL |
-| `ORBIT_ADMIN_TOKEN` | Admin PAT for token minting |
+| `ORBIT_ADMIN_TOKEN` | Admin PAT (lookups, fallback). For invite-key minting, must include `tokens:write` **or** set `ORBIT_MINT_TOKEN` |
+| `ORBIT_MINT_TOKEN` | Optional dedicated PAT with `tokens:write` used only for `apiTokenCreate` |
 | `ORBIT_AUTO_INVITE` | `1` to invite missing ORBIT users |
 
 ## Mock login (dev)

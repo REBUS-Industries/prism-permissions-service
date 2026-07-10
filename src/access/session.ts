@@ -13,7 +13,9 @@ import {
   findOrbitUserByEmail,
   getOrbitActiveUser,
   getOrbitCreds,
+  getOrbitMintCreds,
   inviteOrbitUser,
+  orbitMintScopeHint,
   resolveOrbitServerUrl,
   type OrbitTarget,
 } from '../orbit/client.js';
@@ -296,9 +298,9 @@ export async function exchangeInviteKeySession(body: AccessSessionRequest & { in
     displayName: `Invite ${key.id.slice(0, 8)}`,
   };
 
-  let creds;
+  let mintCreds;
   try {
-    creds = getOrbitCreds(orbitTarget);
+    mintCreds = getOrbitMintCreds(orbitTarget);
   } catch (err) {
     throw new AccessError(
       err instanceof Error ? err.message : `ORBIT credentials missing for target=${orbitTarget}`,
@@ -308,11 +310,11 @@ export async function exchangeInviteKeySession(body: AccessSessionRequest & { in
 
   let servicePrincipalId: string;
   try {
-    const admin = await getOrbitActiveUser(creds);
+    const admin = await getOrbitActiveUser(mintCreds);
     servicePrincipalId = admin.id;
   } catch (err) {
     throw new AccessError(
-      `ORBIT admin token invalid: ${err instanceof Error ? err.message : 'no active user'}`,
+      `ORBIT mint token invalid: ${err instanceof Error ? err.message : 'no active user'}`,
       503,
     );
   }
@@ -332,10 +334,8 @@ export async function exchangeInviteKeySession(body: AccessSessionRequest & { in
       forbidAdminFallback: true,
     });
   } catch (err) {
-    throw new AccessError(
-      `Failed to mint Orbit token for invite key: ${err instanceof Error ? err.message : 'unknown error'}`,
-      503,
-    );
+    const raw = err instanceof Error ? err.message : 'unknown error';
+    throw new AccessError(`Failed to mint Orbit token for invite key: ${orbitMintScopeHint(raw)}`, 503);
   }
 
   if (!minted.token) {
