@@ -164,6 +164,15 @@ export interface CreateInviteKeyResponse {
   maxRedemptions?: number | null;
 }
 
+export interface UpdateInviteKeyRequest {
+  label?: string | null;
+  orbitProjectIds?: string[];
+  projectNames?: Record<string, string> | null;
+  allowedFunctions?: ConnectorFunction[];
+  expiresAt?: string | null;
+  maxRedemptions?: number | null;
+}
+
 export interface ListInviteKeysResponse {
   keys: InviteKeyRecord[];
 }

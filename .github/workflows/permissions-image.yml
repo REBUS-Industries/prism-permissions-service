@@ -90,6 +90,7 @@ jobs:
             tar xzf /tmp/prism-permissions-build.tgz -C "${BUILD_DIR}"
 
             docker build --no-cache --pull \
+              --build-arg "GIT_SHA=${GIT_SHA}" \
               --label "org.opencontainers.image.revision=${GIT_SHA}" \
               --label "org.opencontainers.image.source=https://github.com/REBUS-Industries/prism-permissions-service" \
               -t "${IMAGE}" \
@@ -127,11 +128,28 @@ jobs:
               exit 1
             fi
 
-            # Confirm invite-keys route exists on the new build (best-effort).
-            if docker exec prism-permissions wget -qO- http://127.0.0.1:8771/api/access/invite-keys/demo 2>/dev/null | grep -q invite_demo; then
-              echo "invite-keys demo endpoint ok"
-            else
-              echo "::warning::invite-keys demo endpoint not reachable (adapter may be non-mock)"
+            # Fail deploy if invite-keys admin route is missing.
+            # wget -S prints headers on stderr; 401 body still goes to stdout with -O-.
+            INVITE_PROBE="$(docker exec prism-permissions sh -c 'wget -S -O- http://127.0.0.1:8771/api/access/invite-keys 2>&1' || true)"
+            echo "invite-keys probe: ${INVITE_PROBE:-<empty>}"
+            if echo "${INVITE_PROBE}" | grep -q 'statusCode.:404\|Not Found'; then
+              echo "::error::GET /api/access/invite-keys returned 404 — invite-keys routes missing from image"
+              docker inspect --format '{{.Config.Image}} {{index .Config.Labels "org.opencontainers.image.revision"}}' prism-permissions || true
+              docker compose logs --tail=120 prism-permissions || true
+              exit 1
+            fi
+            if ! echo "${INVITE_PROBE}" | grep -qE '401|Unauthorized'; then
+              echo "::error::GET /api/access/invite-keys did not return 401 Unauthorized (got: ${INVITE_PROBE:-<empty>})"
+              docker compose logs --tail=120 prism-permissions || true
+              exit 1
+            fi
+            echo "invite-keys admin route ok (401 without cookie)"
+
+            ACCESS_HEALTH="$(docker exec prism-permissions wget -qO- http://127.0.0.1:8771/api/access/health 2>/dev/null || true)"
+            echo "access health: ${ACCESS_HEALTH:-<empty>}"
+            if ! echo "${ACCESS_HEALTH}" | grep -q '"inviteKeys":true'; then
+              echo "::error::/api/access/health missing features.inviteKeys=true — wrong build?"
+              exit 1
             fi
 
             rm -rf "${BUILD_DIR}" /tmp/prism-permissions-build.tgz

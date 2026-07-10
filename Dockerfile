@@ -8,7 +8,9 @@ RUN npm run build
 
 FROM node:20-alpine
 WORKDIR /app
+ARG GIT_SHA=
 ENV NODE_ENV=production
+ENV GIT_SHA=$GIT_SHA
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 COPY --from=build /app/dist ./dist
