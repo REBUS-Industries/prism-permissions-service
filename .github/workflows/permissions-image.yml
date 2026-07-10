@@ -1,5 +1,14 @@
 name: permissions-image
 
+# Builds prism-permissions-service and deploys to VM 212 (prism.rebus.industries).
+#
+# GHCR push keeps a registry artifact; deploy builds on VM 212 over SSH because
+# `docker compose pull` on the VM fails with GHCR 403 for polyrepo packages
+# (same pattern as prism-fixtures-service / prism-models-service).
+#
+# SSH uses the `prism-dev` alias from deploy-runner ~/.ssh/config (→ VM 212).
+# That is NOT a separate prism-dev stack — only prod remains.
+
 on:
   push:
     branches: [main]
@@ -20,6 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+        with:
+          # Host Docker daemon — avoids pulling moby/buildkit from Docker Hub.
+          driver: docker
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -38,19 +50,90 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
-  deploy-dev:
+  deploy-vm212:
     needs: build-and-push
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, prism-deploy]
     if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-    permissions:
-      contents: read
+    concurrency:
+      group: prism-deploy-vm212
+      cancel-in-progress: false
+    timeout-minutes: 15
     steps:
-      - name: Trigger deploy on prism monorepo
-        run: |
-          echo '{"event_type":"deploy-dev-service","client_payload":{"service":"prism-permissions"}}' \
-            | gh api repos/REBUS-Industries/prism/dispatches --method POST --input -
+      - uses: actions/checkout@v4
+
+      - name: Build and deploy prism-permissions to VM 212 (prod)
         env:
-          GH_TOKEN: ${{ secrets.PRISM_DISPATCH_TOKEN }}
+          # Deploy-runner SSH alias → VM 212 (prism.rebus.industries). Not a dev stack.
+          DEPLOY_HOST: prism-dev
+        run: |
+          set -euo pipefail
+          PERMS_TAG="sha-${GITHUB_SHA:0:7}"
+          IMAGE="ghcr.io/rebus-industries/prism-permissions-service:${PERMS_TAG}"
+          TARBALL="/tmp/prism-permissions-build-${GITHUB_RUN_ID}.tgz"
+
+          tar czf "${TARBALL}" \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude=dist \
+            Dockerfile package.json package-lock.json tsconfig.json drizzle.config.ts src
+
+          scp -o BatchMode=yes -o ConnectTimeout=10 \
+            "${TARBALL}" "${DEPLOY_HOST}:/tmp/prism-permissions-build.tgz"
+
+          ssh -o BatchMode=yes -o ConnectTimeout=10 "${DEPLOY_HOST}" env \
+            "PERMS_TAG=${PERMS_TAG}" "GIT_SHA=${GITHUB_SHA}" "IMAGE=${IMAGE}" bash -s <<'REMOTE'
+            set -euo pipefail
+            BUILD_DIR="/tmp/prism-permissions-build"
+            rm -rf "${BUILD_DIR}"
+            mkdir -p "${BUILD_DIR}"
+            tar xzf /tmp/prism-permissions-build.tgz -C "${BUILD_DIR}"
+
+            docker build --no-cache --pull \
+              --label "org.opencontainers.image.revision=${GIT_SHA}" \
+              --label "org.opencontainers.image.source=https://github.com/REBUS-Industries/prism-permissions-service" \
+              -t "${IMAGE}" \
+              -f "${BUILD_DIR}/Dockerfile" \
+              "${BUILD_DIR}"
+            docker tag "${IMAGE}" "ghcr.io/rebus-industries/prism-permissions-service:latest"
+
+            cd /opt/prism
+            if [ -f .env ] && grep -q '^PRISM_PERMISSIONS_TAG=' .env; then
+              sed -i "s/^PRISM_PERMISSIONS_TAG=.*/PRISM_PERMISSIONS_TAG=${PERMS_TAG}/" .env
+            else
+              echo "PRISM_PERMISSIONS_TAG=${PERMS_TAG}" >> .env
+            fi
+            export PRISM_PERMISSIONS_TAG="${PERMS_TAG}"
+            echo "Deploying prism-permissions:${PERMS_TAG} (commit ${GIT_SHA})"
+            grep '^PRISM_PERMISSIONS_TAG=' .env
+
+            docker compose up -d --force-recreate --no-deps --no-build prism-permissions
+            docker compose ps prism-permissions
+
+            HEALTH=""
+            for attempt in $(seq 1 12); do
+              HEALTH="$(docker exec prism-permissions wget -qO- http://127.0.0.1:8771/health 2>/dev/null || true)"
+              if echo "${HEALTH}" | grep -q '"status":"ok"'; then
+                break
+              fi
+              echo "waiting for prism-permissions health (attempt ${attempt}/12)..."
+              sleep 5
+            done
+            echo "permissions health: ${HEALTH:-<empty>}"
+            if ! echo "${HEALTH}" | grep -q '"status":"ok"'; then
+              echo "::error::prism-permissions health not ok after deploy"
+              docker compose ps prism-permissions || true
+              docker compose logs --tail=80 prism-permissions || true
+              exit 1
+            fi
+
+            # Confirm invite-keys route exists on the new build (best-effort).
+            if docker exec prism-permissions wget -qO- http://127.0.0.1:8771/api/access/invite-keys/demo 2>/dev/null | grep -q invite_demo; then
+              echo "invite-keys demo endpoint ok"
+            else
+              echo "::warning::invite-keys demo endpoint not reachable (adapter may be non-mock)"
+            fi
+
+            rm -rf "${BUILD_DIR}" /tmp/prism-permissions-build.tgz
+            echo "Deployed prism-permissions:${PERMS_TAG}"
+          REMOTE
