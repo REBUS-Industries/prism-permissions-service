@@ -90,6 +90,34 @@ export async function findOrbitUserByEmail(creds: OrbitCreds, email: string) {
   return match ?? null;
 }
 
+/** Active user for the admin PAT — used as the Orbit service principal for invite-key tokens. */
+export async function getOrbitActiveUser(creds: OrbitCreds): Promise<{
+  id: string;
+  email?: string | null;
+  name?: string | null;
+}> {
+  const data = await gql<{ activeUser: { id: string; email?: string | null; name?: string | null } | null }>(
+    creds,
+    `query { activeUser { id email name } }`,
+  );
+  if (!data.activeUser?.id) {
+    throw new OrbitClientError(401, 'ORBIT admin token has no active user');
+  }
+  return data.activeUser;
+}
+
+/**
+ * True when `id` looks like a real Speckle/Orbit user id (not a PRISM synthetic
+ * `portal:…` / `invite:…` placeholder). Fake ids break apiTokenCreate.
+ */
+export function isRealOrbitUserId(id: string | null | undefined): boolean {
+  if (!id) return false;
+  const trimmed = id.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('portal:') || trimmed.startsWith('invite:')) return false;
+  return true;
+}
+
 export async function inviteOrbitUser(creds: OrbitCreds, email: string, name: string) {
   const data = await gql<{ serverInviteCreate: boolean }>(
     creds,

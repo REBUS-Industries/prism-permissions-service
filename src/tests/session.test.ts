@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildUserSearchQuery } from '../orbit/client.js';
+import { buildUserSearchQuery, isRealOrbitUserId } from '../orbit/client.js';
 import { useBlanketOrbitAccess } from '../access/session.js';
 import { collectEffectiveFunctions } from '../access/manifest.js';
 import { CONNECTOR_FUNCTIONS, CONNECTOR_MANIFEST_SCHEMA } from '../contracts/portal-access.js';
@@ -9,6 +9,14 @@ test('buildUserSearchQuery uses full email and rejects short strings', () => {
   assert.equal(buildUserSearchQuery('ed@rebus.industries'), 'ed@rebus.industries');
   assert.equal(buildUserSearchQuery('  Dom@Rebus.Industries '), 'dom@rebus.industries');
   assert.equal(buildUserSearchQuery('ab'), null);
+});
+
+test('isRealOrbitUserId rejects synthetic portal/invite placeholders', () => {
+  assert.equal(isRealOrbitUserId('portal:invite:abc'), false);
+  assert.equal(isRealOrbitUserId('invite:abc'), false);
+  assert.equal(isRealOrbitUserId(''), false);
+  assert.equal(isRealOrbitUserId(null), false);
+  assert.equal(isRealOrbitUserId('a1b2c3d4e5'), true);
 });
 
 test('useBlanketOrbitAccess defaults to true; env kill-switch forces per-project', async () => {

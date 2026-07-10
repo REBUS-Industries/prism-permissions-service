@@ -11,6 +11,7 @@ import {
 } from '../db/schema.js';
 import {
   findOrbitUserByEmail,
+  getOrbitActiveUser,
   getOrbitCreds,
   inviteOrbitUser,
   resolveOrbitServerUrl,
@@ -245,6 +246,7 @@ async function tryMintOrbitToken(input: {
   try {
     const minted = await mintScopedOrbitToken({
       target: input.orbitTarget,
+      // Prefer a real Orbit user; mintScopedOrbitToken strips synthetic ids.
       orbitUserId,
       email: input.portalUser.email,
       projectIds,
@@ -254,7 +256,7 @@ async function tryMintOrbitToken(input: {
     });
     return {
       orbitToken: minted.token,
-      orbitUserId,
+      orbitUserId: orbitUser?.id ?? orbitUserId,
       scopes: minted.scopes,
       projectIds,
     };
@@ -266,6 +268,8 @@ async function tryMintOrbitToken(input: {
 /**
  * Collaborator invite-key session: no portal user, no blanket access.
  * Identity is attributed as invite:<keyId> for audit.
+ * Orbit token is minted as the admin service principal with limitResources
+ * bound to the key's projects (never a synthetic portal:/invite: user id).
  */
 export async function exchangeInviteKeySession(body: AccessSessionRequest & { inviteKey: string }) {
   const key = await lookupRedeemableInviteKey(body.inviteKey);
@@ -291,26 +295,58 @@ export async function exchangeInviteKeySession(body: AccessSessionRequest & { in
     email: `invite+${key.id}@invite.prism.local`,
     displayName: `Invite ${key.id.slice(0, 8)}`,
   };
-  const orbitUserId = `invite:${key.id}`;
 
-  const linkId = await upsertIdentityLink(syntheticUser, orbitUserId);
-  await cacheProjectPermissions(orbitUserId, projects);
+  let creds;
+  try {
+    creds = getOrbitCreds(orbitTarget);
+  } catch (err) {
+    throw new AccessError(
+      err instanceof Error ? err.message : `ORBIT credentials missing for target=${orbitTarget}`,
+      503,
+    );
+  }
 
-  const minted = await tryMintOrbitToken({
-    orbitTarget,
-    portalUser: syntheticUser,
-    projects,
-    sessionId,
-    blanket: false,
-    fixedFunctions: key.allowedFunctions,
-    forbidAdminFallback: true,
-  });
+  let servicePrincipalId: string;
+  try {
+    const admin = await getOrbitActiveUser(creds);
+    servicePrincipalId = admin.id;
+  } catch (err) {
+    throw new AccessError(
+      `ORBIT admin token invalid: ${err instanceof Error ? err.message : 'no active user'}`,
+      503,
+    );
+  }
+
+  const linkId = await upsertIdentityLink(syntheticUser, servicePrincipalId);
+  await cacheProjectPermissions(`invite:${key.id}`, projects);
+
+  let minted: { token: string; scopes: string[]; projectIds: string[] };
+  try {
+    minted = await mintScopedOrbitToken({
+      target: orbitTarget,
+      orbitUserId: servicePrincipalId,
+      email: `invite:${key.id}`,
+      projectIds: projects.map((p) => p.orbitProjectId),
+      functions: key.allowedFunctions,
+      sessionId,
+      forbidAdminFallback: true,
+    });
+  } catch (err) {
+    throw new AccessError(
+      `Failed to mint Orbit token for invite key: ${err instanceof Error ? err.message : 'unknown error'}`,
+      503,
+    );
+  }
+
+  if (!minted.token) {
+    throw new AccessError('Orbit token mint returned empty token', 503);
+  }
 
   const manifest = await buildConnectorManifest({
     sessionId,
     orbitTarget,
     orbitServerUrl,
-    orbitToken: minted?.orbitToken ?? '',
+    orbitToken: minted.token,
     expiresAt,
     portalUser: syntheticUser,
     portalProjects: projects,
@@ -330,11 +366,11 @@ export async function exchangeInviteKeySession(body: AccessSessionRequest & { in
     expiresAt,
     inviteKeyId: key.id,
     mintRow: {
-      orbitUserId: minted?.orbitUserId ?? orbitUserId,
+      orbitUserId: servicePrincipalId,
       email: syntheticUser.email,
-      projectIds: minted?.projectIds ?? projects.map((p) => p.orbitProjectId),
-      scopes: minted?.scopes ?? [],
-      tokenPrefix: minted?.orbitToken ? minted.orbitToken.slice(0, 8) : 'prism-only',
+      projectIds: minted.projectIds,
+      scopes: minted.scopes,
+      tokenPrefix: minted.token.slice(0, 8),
     },
   });
 
