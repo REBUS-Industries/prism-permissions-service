@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import type { ConnectorFunction } from '../contracts/portal-access.js';
 import {
   OrbitClientError,
-  isRealOrbitUserId,
   type OrbitCreds,
   type OrbitTarget,
   getOrbitCreds,
@@ -10,6 +9,7 @@ import {
 
 export interface MintTokenInput {
   target: OrbitTarget;
+  /** Audit / identity only — ApiTokenCreateInput has no userId field. */
   orbitUserId: string;
   email: string;
   projectIds: string[];
@@ -52,8 +52,9 @@ export function functionsToScopes(functions: ConnectorFunction[]): string[] {
 
 /**
  * Mint a scoped ORBIT personal access token for connector use.
- * Uses Speckle apiTokenCreate when available; falls back to admin delegation token
- * (server still enforces project ACL via user's existing access when using user token).
+ * Uses Speckle apiTokenCreate (token is owned by the authenticated admin PAT);
+ * scopes + limitResources enforce project/function ACL. Falls back to the admin
+ * PAT for portal users unless forbidAdminFallback / ORBIT_MINT_FALLBACK=0.
  */
 export async function mintScopedOrbitToken(input: MintTokenInput): Promise<MintTokenResult> {
   const creds = getOrbitCreds(input.target);
@@ -62,9 +63,6 @@ export async function mintScopedOrbitToken(input: MintTokenInput): Promise<MintT
   const expiresAt = new Date(Date.now() + lifespan * 1000);
   const tokenId = randomUUID();
   const name = `prism-portal:${input.email}:${input.sessionId.slice(0, 8)}`;
-  // Never send synthetic portal:/invite: ids — apiTokenCreate rejects them and
-  // invite sessions previously returned an empty orbitToken as a result.
-  const userId = isRealOrbitUserId(input.orbitUserId) ? input.orbitUserId : undefined;
 
   try {
     const data = await gqlMint(creds, {
@@ -72,7 +70,6 @@ export async function mintScopedOrbitToken(input: MintTokenInput): Promise<MintT
       scopes,
       lifespan,
       projectIds: input.projectIds,
-      userId,
     });
     return {
       token: data.token,
@@ -85,7 +82,6 @@ export async function mintScopedOrbitToken(input: MintTokenInput): Promise<MintT
     if (input.forbidAdminFallback || process.env.ORBIT_MINT_FALLBACK === '0') throw err;
     // Fallback: return admin token — manifest still gates UI for portal users.
     // Invite keys must set forbidAdminFallback so Orbit ACL is never bypassed.
-    // Production should enable apiTokenCreate on orbit-server or set ORBIT_MINT_FALLBACK=0.
     return {
       token: creds.token,
       tokenId,
@@ -103,9 +99,10 @@ async function gqlMint(
     scopes: string[];
     lifespan: number;
     projectIds: string[];
-    userId?: string;
   },
 ): Promise<{ id: string; token: string }> {
+  // ApiTokenCreateInput: name, scopes, lifespan, limitResources — no userId.
+  // Token is always owned by the authenticated admin (ORBIT_ADMIN_TOKEN).
   const token: Record<string, unknown> = {
     name: input.name,
     scopes: input.scopes,
@@ -114,8 +111,6 @@ async function gqlMint(
   if (input.projectIds.length > 0) {
     token.limitResources = input.projectIds.map((id) => ({ id, type: 'project' }));
   }
-  // Omit userId to mint for the authenticated admin (service principal).
-  if (input.userId) token.userId = input.userId;
 
   // Orbit/Speckle: apiTokenCreate returns String! (the raw token), not an object.
   const res = await fetch(`${creds.url}/graphql`, {
