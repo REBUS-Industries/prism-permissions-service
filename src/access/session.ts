@@ -270,8 +270,12 @@ async function tryMintOrbitToken(input: {
 /**
  * Collaborator invite-key session: no portal user, no blanket access.
  * Identity is attributed as invite:<keyId> for audit.
- * Orbit token is minted as the admin service principal with limitResources
- * bound to the key's projects (never a synthetic portal:/invite: user id).
+ *
+ * Orbit credential: try apiTokenCreate with limitResources (needs tokens:write).
+ * If minting is unavailable, reuse PRISM's existing ORBIT_ADMIN_TOKEN /
+ * ORBIT_MINT_TOKEN — the same credential portal sessions already fall back to.
+ * Manifest still scopes projects/functions for the connector; server-side
+ * project ACL on the token requires a successful scoped mint.
  */
 export async function exchangeInviteKeySession(body: AccessSessionRequest & { inviteKey: string }) {
   const key = await lookupRedeemableInviteKey(body.inviteKey);
@@ -314,7 +318,7 @@ export async function exchangeInviteKeySession(body: AccessSessionRequest & { in
     servicePrincipalId = admin.id;
   } catch (err) {
     throw new AccessError(
-      `ORBIT mint token invalid: ${err instanceof Error ? err.message : 'no active user'}`,
+      `ORBIT token invalid: ${err instanceof Error ? err.message : 'no active user'}`,
       503,
     );
   }
@@ -322,24 +326,27 @@ export async function exchangeInviteKeySession(body: AccessSessionRequest & { in
   const linkId = await upsertIdentityLink(syntheticUser, servicePrincipalId);
   await cacheProjectPermissions(`invite:${key.id}`, projects);
 
+  const projectIds = projects.map((p) => p.orbitProjectId);
   let minted: { token: string; scopes: string[]; projectIds: string[] };
   try {
+    // Prefer scoped child token; fall back to PRISM's existing Orbit PAT
+    // (same behaviour as portal session when apiTokenCreate is unavailable).
     minted = await mintScopedOrbitToken({
       target: orbitTarget,
       orbitUserId: servicePrincipalId,
       email: `invite:${key.id}`,
-      projectIds: projects.map((p) => p.orbitProjectId),
+      projectIds,
       functions: key.allowedFunctions,
       sessionId,
-      forbidAdminFallback: true,
+      forbidAdminFallback: false,
     });
   } catch (err) {
     const raw = err instanceof Error ? err.message : 'unknown error';
-    throw new AccessError(`Failed to mint Orbit token for invite key: ${orbitMintScopeHint(raw)}`, 503);
+    throw new AccessError(`Failed to obtain Orbit token for invite key: ${orbitMintScopeHint(raw)}`, 503);
   }
 
   if (!minted.token) {
-    throw new AccessError('Orbit token mint returned empty token', 503);
+    throw new AccessError('Orbit token missing for invite key session', 503);
   }
 
   const manifest = await buildConnectorManifest({

@@ -131,12 +131,11 @@ When `portal_adapter=mock` (prism-dev):
 
 1. **Manifest** — client DenyIfNotAllowed is UX only; invite keys never set
    `orbitBlanketAccess=true` and never include `receive` / `create_project`.
-2. **Orbit token** — minted via `apiTokenCreate` as the mint/admin PAT's
-   user, with `limitResources` = key project ids and scopes from allowed
-   functions. The minting PAT (`ORBIT_MINT_TOKEN` or `ORBIT_ADMIN_TOKEN`)
-   **must** include the `tokens:write` scope. Synthetic `invite:<id>` /
-   `portal:<id>` user ids are never sent to Orbit. Mint failure returns
-   **503** instead of an empty token.
+2. **Orbit token** — prefer `apiTokenCreate` with `limitResources` (needs
+   `tokens:write` on `ORBIT_MINT_TOKEN` / `ORBIT_ADMIN_TOKEN`). If minting is
+   unavailable, reuse PRISM's existing Orbit PAT — the same fallback portal
+   sessions already use. Manifest still lists only the key's projects and
+   Light functions for the connector.
 3. **Revocation** — key revoke marks sessions + minted tokens `revokedAt`.
 4. **Audit** — `invite_key.created_by`, `invite_key_redemption` rows, session
    `invite_key_id`, manifest `userId` / `inviteKeyId`.
