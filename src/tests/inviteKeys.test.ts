@@ -153,3 +153,23 @@ test('invite-key manifest carries modelAccess fields', () => {
   assert.equal(manifest.authoredProperty, 'userId');
   assert.equal(manifest.userId, 'invite:demo');
 });
+
+test('session refresh contract: grant fields may change while token/session stay', () => {
+  // GET /api/access/manifest rebuilds modelAccess from the live invite key while
+  // preserving sessionId + orbitToken (see refreshInviteKeySessionManifest).
+  const before = {
+    sessionId: 'sess-keep',
+    orbitToken: 'tok-keep',
+    modelAccess: 'selected' as const,
+    selectedModelIds: ['m1'],
+  };
+  const after = {
+    ...before,
+    modelAccess: 'all' as const,
+    selectedModelIds: [] as string[],
+  };
+  assert.equal(after.sessionId, before.sessionId);
+  assert.equal(after.orbitToken, before.orbitToken);
+  assert.equal(after.modelAccess, 'all');
+  assert.deepEqual(after.selectedModelIds, []);
+});
