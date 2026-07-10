@@ -363,6 +363,8 @@ export async function exchangeInviteKeySession(body: AccessSessionRequest & { in
     fixedAllowedFunctions: key.allowedFunctions,
     authMethod: 'invite_key',
     inviteKeyId: key.id,
+    modelAccess: key.modelAccess,
+    selectedModelIds: key.selectedModelIds,
   });
 
   await persistAccessSession({

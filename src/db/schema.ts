@@ -110,6 +110,8 @@ export const inviteKey = pgTable(
     orbitProjectIds: jsonb('orbit_project_ids').$type<string[]>().notNull(),
     projectNames: jsonb('project_names').$type<Record<string, string>>().notNull().default({}),
     allowedFunctions: jsonb('allowed_functions').$type<string[]>().notNull(),
+    modelAccess: text('model_access').notNull().default('all'),
+    selectedModelIds: jsonb('selected_model_ids').$type<string[]>().notNull().default([]),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     maxRedemptions: integer('max_redemptions'),
     redemptionCount: integer('redemption_count').notNull().default(0),

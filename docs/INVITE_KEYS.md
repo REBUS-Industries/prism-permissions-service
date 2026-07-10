@@ -14,12 +14,24 @@ Contract source of truth: `src/contracts/portal-access.ts`
 
 1. An Orbit/PRISM admin creates a key bound to one or more `orbitProjectId`s,
    `allowedFunctions` (default Light set), optional label / expiry /
-   `maxRedemptions`.
+   `maxRedemptions`, and **model access** (`all` | `selected` | `authored`).
 2. Admin copies the plaintext key (or redeem URL) to the collaborator.
 3. Connector Light pastes the key → `POST /api/access/session` with
    `{ inviteKey }` → `{ manifest }`.
 4. No separate Orbit login user is required. Sessions are attributed as
    `invite:<keyId>` in identity / audit fields.
+
+### Model access modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `all` (default) | Every model in the key's granted projects |
+| `selected` | Only models listed in `selectedModelIds` (required, non-empty) |
+| `authored` | Only models whose Orbit property **`userId`** equals `manifest.userId` (`invite:<keyId>`) — i.e. models the guest uploaded with that author id baked in |
+
+Orbit tokens remain **project**-scoped. Model filtering is enforced by the
+connector using manifest fields (`modelAccess`, `selectedModelIds`,
+`authoredProperty: "userId"`).
 
 ### Light default functions
 
@@ -43,7 +55,9 @@ Contract source of truth: `src/contracts/portal-access.ts`
   "label": "Acme collaborator",
   "expiresAt": "2026-12-31T00:00:00.000Z",
   "maxRedemptions": 10,
-  "projectNames": { "mock-project-1": "Demo Project A" }
+  "projectNames": { "mock-project-1": "Demo Project A" },
+  "modelAccess": "selected",
+  "selectedModelIds": ["model-abc", "model-def"]
 }
 ```
 
@@ -58,9 +72,16 @@ Response (plaintext `key` shown **once**):
   "projects": [{ "orbitProjectId": "mock-project-1", "projectName": "Demo Project A" }],
   "allowedFunctions": ["send", "create_model", "create_version", "list_models"],
   "label": "Acme collaborator",
-  "maxRedemptions": 10
+  "maxRedemptions": 10,
+  "modelAccess": "selected",
+  "selectedModelIds": ["model-abc", "model-def"]
 }
 ```
+
+### `PATCH /api/access/invite-keys/:id`
+
+Partial update (label, projects, functions, expiry, redemptions, `modelAccess` /
+`selectedModelIds`). Revoked keys cannot be edited.
 
 ### `GET /api/access/invite-keys`
 
@@ -97,6 +118,9 @@ Manifest extras:
   "inviteKeyId": "…",
   "orbitBlanketAccess": false,
   "userId": "invite:<keyId>",
+  "modelAccess": "authored",
+  "selectedModelIds": [],
+  "authoredProperty": "userId",
   "globalAllowedFunctions": [],
   "projects": [
     {
@@ -107,6 +131,15 @@ Manifest extras:
   ]
 }
 ```
+
+Connector responsibilities for model access:
+
+1. **`all`** — list/open any model in granted projects.
+2. **`selected`** — filter `list_models` / open to `selectedModelIds`.
+3. **`authored`** — filter to models where property `userId` (or
+   `properties.userId`) equals `manifest.userId`. On `create_model` /
+   upload, bake `userId = manifest.userId` so later sessions see the guest's
+   own models.
 
 ### `GET /api/access/invite-login?key=…&redirect_uri=http://localhost:29364/`
 
@@ -136,9 +169,20 @@ When `portal_adapter=mock` (prism-dev):
    unavailable, reuse PRISM's existing Orbit PAT — the same fallback portal
    sessions already use. Manifest still lists only the key's projects and
    Light functions for the connector.
-3. **Revocation** — key revoke marks sessions + minted tokens `revokedAt`.
-4. **Audit** — `invite_key.created_by`, `invite_key_redemption` rows, session
+3. **Model access** — connector filters `list_models` / open using
+   `modelAccess` / `selectedModelIds` / `authoredProperty` (`userId`).
+4. **Revocation** — key revoke marks sessions + minted tokens `revokedAt`.
+5. **Audit** — `invite_key.created_by`, `invite_key_redemption` rows, session
    `invite_key_id`, manifest `userId` / `inviteKeyId`.
+
+---
+
+## Admin UI (PRISM monorepo)
+
+Guest properties dialog should expose three radios (all / selected / authored)
+and a model selection tree when `selected`. Apply the scaffold under
+`docs/scaffolds/guest-model-access/` in the PRISM monorepo (this polyrepo
+cannot push there).
 
 ---
 

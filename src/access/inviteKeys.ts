@@ -3,12 +3,14 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import {
   CONNECTOR_FUNCTIONS,
   INVITE_KEY_DENIED_FUNCTIONS,
+  INVITE_MODEL_ACCESS_MODES,
   LIGHT_CONNECTOR_FUNCTIONS,
   type ConnectorFunction,
   type CreateInviteKeyRequest,
   type CreateInviteKeyResponse,
   type InviteKeyProject,
   type InviteKeyRecord,
+  type InviteModelAccess,
   type UpdateInviteKeyRequest,
 } from '../contracts/portal-access.js';
 import { hashApiKey } from '../auth/apiKey.js';
@@ -22,6 +24,7 @@ export const DEMO_INVITE_KEY_ID = 'invite-demo-light';
 
 const ALLOWED_SET = new Set<string>(CONNECTOR_FUNCTIONS);
 const DENIED_SET = new Set<string>(INVITE_KEY_DENIED_FUNCTIONS);
+const MODEL_ACCESS_SET = new Set<string>(INVITE_MODEL_ACCESS_MODES);
 
 export function normalizeInviteFunctions(raw?: ConnectorFunction[] | null): ConnectorFunction[] {
   const source = raw?.length ? raw : LIGHT_CONNECTOR_FUNCTIONS;
@@ -41,6 +44,24 @@ export function normalizeInviteFunctions(raw?: ConnectorFunction[] | null): Conn
   return out;
 }
 
+export function normalizeModelAccess(
+  mode?: InviteModelAccess | null,
+  selectedModelIds?: string[] | null,
+): { modelAccess: InviteModelAccess; selectedModelIds: string[] } {
+  const modelAccess: InviteModelAccess = mode && MODEL_ACCESS_SET.has(mode) ? mode : 'all';
+  if (mode && !MODEL_ACCESS_SET.has(mode)) {
+    throw new AccessError(`Unknown modelAccess: ${mode}`, 400);
+  }
+  const ids = [...new Set((selectedModelIds ?? []).map((id) => id.trim()).filter(Boolean))];
+  if (modelAccess === 'selected' && ids.length === 0) {
+    throw new AccessError('selectedModelIds required when modelAccess is selected', 400);
+  }
+  return {
+    modelAccess,
+    selectedModelIds: modelAccess === 'selected' ? ids : [],
+  };
+}
+
 function generateInviteKeyPlaintext(): string {
   // URL-safe, high entropy; prefix makes logs/UI recognizable.
   return `invite_${randomBytes(24).toString('base64url')}`;
@@ -52,12 +73,15 @@ function toRecord(row: typeof inviteKey.$inferSelect, extras?: { key?: string; r
     orbitProjectId: id,
     projectName: names[id] ?? null,
   }));
+  const modelAccess = (MODEL_ACCESS_SET.has(row.modelAccess) ? row.modelAccess : 'all') as InviteModelAccess;
   return {
     id: row.id,
     label: row.label,
     orbitTarget: row.orbitTarget as 'prod' | 'dev',
     projects,
     allowedFunctions: row.allowedFunctions as ConnectorFunction[],
+    modelAccess,
+    selectedModelIds: modelAccess === 'selected' ? ((row.selectedModelIds ?? []) as string[]) : [],
     expiresAt: row.expiresAt?.toISOString() ?? null,
     maxRedemptions: row.maxRedemptions,
     redemptionCount: row.redemptionCount,
@@ -108,6 +132,11 @@ export async function createInviteKey(
     }
   }
 
+  const { modelAccess, selectedModelIds } = normalizeModelAccess(
+    input.modelAccess,
+    input.selectedModelIds,
+  );
+
   const id = randomUUID();
   const plaintext = generateInviteKeyPlaintext();
   const keyHash = hashApiKey(plaintext);
@@ -124,6 +153,8 @@ export async function createInviteKey(
     orbitProjectIds: projectIds,
     projectNames,
     allowedFunctions,
+    modelAccess,
+    selectedModelIds,
     expiresAt,
     maxRedemptions,
     redemptionCount: 0,
@@ -144,6 +175,8 @@ export async function createInviteKey(
     allowedFunctions,
     label: input.label?.trim() || null,
     maxRedemptions,
+    modelAccess,
+    selectedModelIds,
   };
 }
 
@@ -219,6 +252,18 @@ export async function updateInviteKey(id: string, input: UpdateInviteKeyRequest)
     patch.maxRedemptions = maxRedemptions;
   }
 
+  if (input.modelAccess !== undefined || input.selectedModelIds !== undefined) {
+    const currentMode = (MODEL_ACCESS_SET.has(row.modelAccess) ? row.modelAccess : 'all') as InviteModelAccess;
+    const normalized = normalizeModelAccess(
+      input.modelAccess !== undefined ? input.modelAccess : currentMode,
+      input.selectedModelIds !== undefined
+        ? input.selectedModelIds
+        : (row.selectedModelIds as string[]),
+    );
+    patch.modelAccess = normalized.modelAccess;
+    patch.selectedModelIds = normalized.selectedModelIds;
+  }
+
   if (Object.keys(patch).length === 0) {
     return toRecord(row);
   }
@@ -264,6 +309,8 @@ export type RedeemableInviteKey = {
   orbitProjectIds: string[];
   projectNames: Record<string, string>;
   allowedFunctions: ConnectorFunction[];
+  modelAccess: InviteModelAccess;
+  selectedModelIds: string[];
   createdBy: string;
 };
 
@@ -295,6 +342,9 @@ export async function lookupRedeemableInviteKey(plaintext: string): Promise<Rede
     orbitProjectIds: row.orbitProjectIds,
     projectNames: (row.projectNames ?? {}) as Record<string, string>,
     allowedFunctions: row.allowedFunctions as ConnectorFunction[],
+    modelAccess: (MODEL_ACCESS_SET.has(row.modelAccess) ? row.modelAccess : 'all') as InviteModelAccess,
+    selectedModelIds:
+      row.modelAccess === 'selected' ? ((row.selectedModelIds ?? []) as string[]) : [],
     createdBy: row.createdBy,
   };
 }
