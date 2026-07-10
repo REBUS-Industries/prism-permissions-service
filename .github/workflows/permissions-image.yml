@@ -155,3 +155,5 @@ jobs:
             rm -rf "${BUILD_DIR}" /tmp/prism-permissions-build.tgz
             echo "Deployed prism-permissions:${PERMS_TAG}"
           REMOTE
+
+# redeploy trigger 2026-07-10T11:18:21Z
