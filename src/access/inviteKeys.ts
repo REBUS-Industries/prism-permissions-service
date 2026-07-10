@@ -259,6 +259,7 @@ export async function revokeInviteKey(id: string): Promise<InviteKeyRecord> {
 
 export type RedeemableInviteKey = {
   id: string;
+  label?: string | null;
   orbitTarget: 'prod' | 'dev';
   orbitProjectIds: string[];
   projectNames: Record<string, string>;
@@ -289,6 +290,7 @@ export async function lookupRedeemableInviteKey(plaintext: string): Promise<Rede
 
   return {
     id: row.id,
+    label: row.label,
     orbitTarget: row.orbitTarget as 'prod' | 'dev',
     orbitProjectIds: row.orbitProjectIds,
     projectNames: (row.projectNames ?? {}) as Record<string, string>,

@@ -299,7 +299,7 @@ export async function exchangeInviteKeySession(body: AccessSessionRequest & { in
   const syntheticUser = {
     userId: `invite:${key.id}`,
     email: `invite+${key.id}@invite.prism.local`,
-    displayName: `Invite ${key.id.slice(0, 8)}`,
+    displayName: key.label?.trim() || `Invite ${key.id.slice(0, 8)}`,
   };
 
   let mintCreds;
