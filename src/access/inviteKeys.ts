@@ -314,6 +314,21 @@ export type RedeemableInviteKey = {
   createdBy: string;
 };
 
+function toRedeemable(row: typeof inviteKey.$inferSelect): RedeemableInviteKey {
+  const modelAccess = (MODEL_ACCESS_SET.has(row.modelAccess) ? row.modelAccess : 'all') as InviteModelAccess;
+  return {
+    id: row.id,
+    label: row.label,
+    orbitTarget: row.orbitTarget as 'prod' | 'dev',
+    orbitProjectIds: row.orbitProjectIds,
+    projectNames: (row.projectNames ?? {}) as Record<string, string>,
+    allowedFunctions: row.allowedFunctions as ConnectorFunction[],
+    modelAccess,
+    selectedModelIds: modelAccess === 'selected' ? ((row.selectedModelIds ?? []) as string[]) : [],
+    createdBy: row.createdBy,
+  };
+}
+
 /**
  * Look up a plaintext invite key and assert it is still redeemable.
  * Does not increment redemption count — call {@link recordInviteKeyRedemption} after session mint.
@@ -335,18 +350,28 @@ export async function lookupRedeemableInviteKey(plaintext: string): Promise<Rede
     throw new AccessError('Invite key has reached its redemption limit', 401);
   }
 
-  return {
-    id: row.id,
-    label: row.label,
-    orbitTarget: row.orbitTarget as 'prod' | 'dev',
-    orbitProjectIds: row.orbitProjectIds,
-    projectNames: (row.projectNames ?? {}) as Record<string, string>,
-    allowedFunctions: row.allowedFunctions as ConnectorFunction[],
-    modelAccess: (MODEL_ACCESS_SET.has(row.modelAccess) ? row.modelAccess : 'all') as InviteModelAccess,
-    selectedModelIds:
-      row.modelAccess === 'selected' ? ((row.selectedModelIds ?? []) as string[]) : [],
-    createdBy: row.createdBy,
-  };
+  return toRedeemable(row);
+}
+
+/**
+ * Load an invite key by id for refreshing an existing session.
+ * Revoked / expired keys fail closed. Redemption limits do not block refresh
+ * (the session was already minted).
+ */
+export async function loadInviteKeyForSessionRefresh(id: string): Promise<RedeemableInviteKey> {
+  const trimmed = id.trim();
+  if (!trimmed) throw new AccessError('inviteKeyId required', 400);
+
+  const db = getDb();
+  const rows = await db.select().from(inviteKey).where(eq(inviteKey.id, trimmed)).limit(1);
+  const row = rows[0];
+  if (!row) throw new AccessError('Invite key not found', 404);
+  if (row.revokedAt) throw new AccessError('Invite key has been revoked', 401);
+  if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) {
+    throw new AccessError('Invite key has expired', 401);
+  }
+
+  return toRedeemable(row);
 }
 
 export async function recordInviteKeyRedemption(input: {

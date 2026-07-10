@@ -141,6 +141,20 @@ Connector responsibilities for model access:
    upload, bake `userId = manifest.userId` so later sessions see the guest's
    own models.
 
+### `GET /api/access/manifest?sessionId=`
+
+Returns the connector manifest for an active session.
+
+For **invite-key** sessions, grant fields are rebuilt from the **live** invite key
+row before returning (and the session row is updated). That means an admin
+`PATCH` of `modelAccess` / `selectedModelIds` / projects / functions is visible
+to the connector on the next model-list refresh **without** signing out.
+
+Preserved across refresh: `sessionId`, `orbitToken`, `expiresAt`, `userId`,
+`email`. `displayName` follows the current invite key label when set.
+
+Portal sessions still return the stored snapshot.
+
 ### `GET /api/access/invite-login?key=…&redirect_uri=http://localhost:29364/`
 
 Validates the key, then redirects to

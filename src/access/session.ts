@@ -26,10 +26,12 @@ import { resolveProvisionedAccess, recordProvisionedLogin } from '../workspace/s
 import { getIntegrationSettingOr } from '../config/integrationSettings.js';
 import {
   extractInviteKeyFromSessionRequest,
+  loadInviteKeyForSessionRefresh,
   lookupRedeemableInviteKey,
   recordInviteKeyRedemption,
 } from './inviteKeys.js';
 import { AccessError } from './errors.js';
+import type { ConnectorManifest } from '../contracts/portal-access.js';
 
 export { AccessError };
 
@@ -486,7 +488,67 @@ export async function getSessionManifest(sessionId: string) {
   const row = rows[0];
   if (!row || row.revokedAt) throw new AccessError('Session not found', 404);
   if (row.expiresAt < new Date()) throw new AccessError('Session expired', 401);
-  return row.manifest as import('../contracts/portal-access.js').ConnectorManifest;
+
+  const stored = row.manifest as ConnectorManifest;
+  const inviteKeyId = row.inviteKeyId ?? stored.inviteKeyId ?? null;
+  if (!inviteKeyId && stored.authMethod !== 'invite_key') {
+    return stored;
+  }
+
+  // Rebuild grant fields from the live invite key so admin PATCH of
+  // modelAccess / projects / functions is visible without re-login.
+  return refreshInviteKeySessionManifest(row, stored, inviteKeyId);
+}
+
+/**
+ * Re-apply live invite-key grants onto an existing session manifest.
+ * Preserves sessionId, orbitToken, expiresAt, and identity fields.
+ */
+export async function refreshInviteKeySessionManifest(
+  row: typeof accessSession.$inferSelect,
+  stored: ConnectorManifest,
+  inviteKeyId: string | null,
+): Promise<ConnectorManifest> {
+  const keyId = (inviteKeyId ?? stored.inviteKeyId ?? '').trim();
+  if (!keyId) return stored;
+
+  const key = await loadInviteKeyForSessionRefresh(keyId);
+  const projects: PortalProjectPermission[] = key.orbitProjectIds.map((orbitProjectId) => ({
+    orbitProjectId,
+    level: 'contributor' as const,
+    projectName: key.projectNames[orbitProjectId] ?? null,
+  }));
+
+  const expiresAt = row.expiresAt instanceof Date ? row.expiresAt : new Date(row.expiresAt);
+  const refreshed = await buildConnectorManifest({
+    sessionId: stored.sessionId || row.id,
+    orbitTarget: stored.orbitTarget ?? key.orbitTarget,
+    orbitServerUrl: stored.orbitServerUrl,
+    orbitToken: stored.orbitToken,
+    expiresAt,
+    portalUser: {
+      userId: stored.userId,
+      email: stored.email,
+      displayName: key.label?.trim() || stored.displayName,
+    },
+    portalProjects: projects,
+    roleRefs: [],
+    orbitBlanketAccess: false,
+    prismAccessToken: stored.prismAccessToken ?? stored.sessionId ?? row.id,
+    fixedAllowedFunctions: key.allowedFunctions,
+    authMethod: 'invite_key',
+    inviteKeyId: key.id,
+    modelAccess: key.modelAccess,
+    selectedModelIds: key.selectedModelIds,
+  });
+
+  const db = getDb();
+  await db
+    .update(accessSession)
+    .set({ manifest: refreshed })
+    .where(eq(accessSession.id, row.id));
+
+  return refreshed;
 }
 
 export async function revokeSession(sessionId: string) {
