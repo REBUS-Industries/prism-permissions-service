@@ -27,6 +27,14 @@ Portal-brokered access + node-based connector permissions for PRISM/ORBIT.
 
 Port **8771** · image `ghcr.io/rebus-industries/prism-permissions-service`
 
+## Deploy (prod / VM 212)
+
+`permissions-image` builds on GitHub-hosted runners, then deploys via the
+`[self-hosted, prism-deploy]` runner over SSH (`prism-dev` alias → VM 212).
+There is no separate prism-dev stack. Deploy builds the image on the VM (GHCR
+pull is 403 for polyrepo packages) and pins `PRISM_PERMISSIONS_TAG` in
+`/opt/prism/.env`.
+
 ## Environment
 
 | Variable | Description |
