@@ -17,8 +17,9 @@ export interface MintTokenInput {
   sessionId: string;
   lifespanSeconds?: number;
   /**
-   * When true, never fall back to the admin PAT. Required for invite keys so
-   * Orbit ACL (limitResources + scopes) is always enforced server-side.
+   * When true, never fall back to the admin PAT.
+   * Invite keys default to allowing fallback so they can use PRISM's existing
+   * ORBIT_ADMIN_TOKEN when apiTokenCreate lacks tokens:write (same as portal).
    */
   forbidAdminFallback?: boolean;
 }
