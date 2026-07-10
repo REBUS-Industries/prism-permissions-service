@@ -2,9 +2,11 @@ import { eq } from 'drizzle-orm';
 import {
   CONNECTOR_FUNCTIONS,
   CONNECTOR_MANIFEST_SCHEMA,
+  INVITE_AUTHORED_MODEL_PROPERTY,
   type ConnectorFunction,
   type ConnectorManifest,
   type ConnectorManifestProject,
+  type InviteModelAccess,
   type PortalProjectPermission,
 } from '../contracts/portal-access.js';
 import { getDb } from '../db/client.js';
@@ -108,11 +110,15 @@ export async function buildConnectorManifest(input: {
   fixedAllowedFunctions?: ConnectorFunction[];
   authMethod?: 'portal' | 'invite_key';
   inviteKeyId?: string;
+  /** Invite-key model visibility; omitted for portal sessions. */
+  modelAccess?: InviteModelAccess;
+  selectedModelIds?: string[];
 }): Promise<ConnectorManifest> {
   const graph = await loadPolicyGraph();
   const roleRefs = input.roleRefs ?? [];
   const blanket = input.orbitBlanketAccess === true;
   const fixed = input.fixedAllowedFunctions;
+  const modelAccess = input.modelAccess;
 
   // Phase 2: per-project entries when blanket is off and projects are provisioned.
   const projects: ConnectorManifestProject[] = blanket
@@ -150,6 +156,17 @@ export async function buildConnectorManifest(input: {
           : [],
     ...(input.authMethod ? { authMethod: input.authMethod } : {}),
     ...(input.inviteKeyId ? { inviteKeyId: input.inviteKeyId } : {}),
+    ...(modelAccess
+      ? {
+          modelAccess,
+          selectedModelIds:
+            modelAccess === 'selected'
+              ? [...new Set(input.selectedModelIds ?? [])].sort()
+              : [],
+          authoredProperty:
+            modelAccess === 'authored' ? INVITE_AUTHORED_MODEL_PROPERTY : undefined,
+        }
+      : {}),
   };
 }
 

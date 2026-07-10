@@ -116,6 +116,21 @@ export const INVITE_KEY_DENIED_FUNCTIONS: ConnectorFunction[] = [
 
 export type InviteKeyAuthMethod = 'portal' | 'invite_key';
 
+/**
+ * How a guest invite key may list/open models within its granted projects.
+ * - `all` — every model in the granted projects
+ * - `selected` — only `selectedModelIds`
+ * - `authored` — only models whose Orbit property `userId` matches the
+ *   invite session identity (`manifest.userId` = `invite:<keyId>`), i.e.
+ *   models the guest uploaded with that author id baked in
+ */
+export type InviteModelAccess = 'all' | 'selected' | 'authored';
+
+export const INVITE_MODEL_ACCESS_MODES: InviteModelAccess[] = ['all', 'selected', 'authored'];
+
+/** Orbit model property used for authored-only filtering. */
+export const INVITE_AUTHORED_MODEL_PROPERTY = 'userId' as const;
+
 export interface InviteKeyProject {
   orbitProjectId: string;
   projectName?: string | null;
@@ -132,6 +147,10 @@ export interface CreateInviteKeyRequest {
   maxRedemptions?: number | null;
   /** Optional display names keyed by project id (or parallel list via projects). */
   projectNames?: Record<string, string> | null;
+  /** Defaults to `all`. */
+  modelAccess?: InviteModelAccess;
+  /** Required when modelAccess is `selected`. */
+  selectedModelIds?: string[] | null;
 }
 
 export interface InviteKeyRecord {
@@ -140,6 +159,8 @@ export interface InviteKeyRecord {
   orbitTarget: 'prod' | 'dev';
   projects: InviteKeyProject[];
   allowedFunctions: ConnectorFunction[];
+  modelAccess: InviteModelAccess;
+  selectedModelIds: string[];
   expiresAt?: string | null;
   maxRedemptions?: number | null;
   redemptionCount: number;
@@ -162,6 +183,8 @@ export interface CreateInviteKeyResponse {
   allowedFunctions: ConnectorFunction[];
   label?: string | null;
   maxRedemptions?: number | null;
+  modelAccess: InviteModelAccess;
+  selectedModelIds: string[];
 }
 
 export interface UpdateInviteKeyRequest {
@@ -171,6 +194,8 @@ export interface UpdateInviteKeyRequest {
   allowedFunctions?: ConnectorFunction[];
   expiresAt?: string | null;
   maxRedemptions?: number | null;
+  modelAccess?: InviteModelAccess;
+  selectedModelIds?: string[] | null;
 }
 
 export interface ListInviteKeysResponse {
@@ -202,6 +227,18 @@ export interface ConnectorManifest {
   authMethod?: InviteKeyAuthMethod;
   /** Present when authMethod is invite_key — for audit / connector attribution. */
   inviteKeyId?: string;
+  /**
+   * Invite-key model visibility within granted projects.
+   * Connector filters list_models / open using this (Orbit token is still project-scoped).
+   */
+  modelAccess?: InviteModelAccess;
+  /** When modelAccess is `selected`. */
+  selectedModelIds?: string[];
+  /**
+   * Orbit model property name for authored-only filter (`userId`).
+   * Compare model[authoredProperty] / properties[authoredProperty] to `userId`.
+   */
+  authoredProperty?: typeof INVITE_AUTHORED_MODEL_PROPERTY;
 }
 
 export interface AccessSessionResponse {
