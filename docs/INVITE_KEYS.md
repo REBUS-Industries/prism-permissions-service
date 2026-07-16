@@ -47,8 +47,9 @@ When `allowedFunctions` is omitted on create, the key gets:
 Admins may grant **any** `ConnectorFunction`, including `receive`,
 `use_library`, `use_infile`, `create_project`, and `list_projects`. A send-only
 invite yields a Lite-like UX in the single connector binary. Grant panel
-surfaces independently — or use `receive` alone (still unlocks Library / In
-File for back-compat).
+surfaces independently — Library / In File are **not** implied by `receive`.
+Connector **Refresh panel** re-fetches the invite manifest so grant changes
+apply without signing out.
 
 `orbitBlanketAccess` is **always `false`** for invite-key sessions.
 
@@ -58,10 +59,10 @@ File for back-compat).
 |-----------------|--------------|
 | `canSend` | `Allows("send")` |
 | `canReceive` | `Allows("receive")` |
-| `canUseLibrary` | `Allows("use_library")` **or** `Allows("receive")` |
-| `canUseInFile` | `Allows("use_infile")` **or** `Allows("receive")` |
+| `canUseLibrary` | `Allows("use_library")` |
+| `canUseInFile` | `Allows("use_infile")` |
 | `canOpenOrbitLinks` | `authMethod != "invite_key"` |
-| Auth methods shown | portal + invite (invite-only users simply use invite) |
+| Auth methods shown | portal + Orbit OAuth + invite (no PAT) |
 
 Client hide/show is UX only. Orbit token ACL remains the real enforcement.
 
@@ -85,7 +86,7 @@ Client hide/show is UX only. Orbit token ACL remains the real enforcement.
 }
 ```
 
-Response (plaintext `key` shown **once**):
+Response (plaintext `key` is also sealed at rest for later admin reveal):
 
 ```json
 {
@@ -101,6 +102,16 @@ Response (plaintext `key` shown **once**):
   "selectedModelIds": ["model-abc", "model-def"]
 }
 ```
+
+### `GET /api/access/invite-keys/:id/reveal`
+
+Returns `{ id, key, redeemUrl, recoverable }` for an active key. Keys created
+before ciphertext storage return **409** — use rotate instead.
+
+### `POST /api/access/invite-keys/:id/rotate`
+
+Issues a new plaintext (updates hash + sealed ciphertext). Collaborators must
+use the new key string.
 
 ### `PATCH /api/access/invite-keys/:id`
 
