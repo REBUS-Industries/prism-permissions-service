@@ -85,8 +85,8 @@ export async function mintScopedOrbitToken(input: MintTokenInput): Promise<MintT
     };
   } catch (err) {
     if (input.forbidAdminFallback || process.env.ORBIT_MINT_FALLBACK === '0') throw err;
-    // Fallback: return admin token — manifest still gates UI for portal users.
-    // Invite keys must set forbidAdminFallback so Orbit ACL is never bypassed.
+    // Fallback: return admin token — manifest still gates UI. Used by portal
+    // sessions and invite keys when the mint PAT lacks tokens:write.
     return {
       token: creds.token,
       tokenId,

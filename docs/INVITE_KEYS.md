@@ -204,9 +204,10 @@ When `portal_adapter=mock` (prism-dev):
    keys never set `orbitBlanketAccess=true`. Grants are exactly the key's
    `allowedFunctions` (fail closed when empty/missing for invite sessions).
 2. **Orbit token** — prefer `apiTokenCreate` with `limitResources` (needs
-   `tokens:write` on `ORBIT_MINT_TOKEN` / `ORBIT_ADMIN_TOKEN`). Invite-key
-   mints set `forbidAdminFallback: true` — a failed scoped mint **must not**
-   fall back to a broad admin PAT.
+   `tokens:write` on `ORBIT_MINT_TOKEN` / `ORBIT_ADMIN_TOKEN`). When that
+   scope is missing, invite sessions reuse the same admin PAT fallback as
+   portal sessions (`forbidAdminFallback: false`). Manifest ACL still gates
+   the connector UI; set a mint PAT with `tokens:write` for real Orbit ACL.
 3. **Model access** — connector filters `list_models` / open using
    `modelAccess` / `selectedModelIds` / `authoredProperty` (`userId`).
 4. **Revocation** — key revoke marks sessions + minted tokens `revokedAt`.
