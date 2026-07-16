@@ -273,11 +273,9 @@ async function tryMintOrbitToken(input: {
  * Collaborator invite-key session: no portal user, no blanket access.
  * Identity is attributed as invite:<keyId> for audit.
  *
- * Orbit credential: try apiTokenCreate with limitResources (needs tokens:write).
- * If minting is unavailable, reuse PRISM's existing ORBIT_ADMIN_TOKEN /
- * ORBIT_MINT_TOKEN — the same credential portal sessions already fall back to.
- * Manifest still scopes projects/functions for the connector; server-side
- * project ACL on the token requires a successful scoped mint.
+ * Orbit credential: apiTokenCreate with limitResources (needs tokens:write on
+ * ORBIT_MINT_TOKEN or ORBIT_ADMIN_TOKEN). Invite sessions set
+ * forbidAdminFallback — a failed mint must not return a broad admin PAT.
  */
 export async function exchangeInviteKeySession(body: AccessSessionRequest & { inviteKey: string }) {
   const key = await lookupRedeemableInviteKey(body.inviteKey);
