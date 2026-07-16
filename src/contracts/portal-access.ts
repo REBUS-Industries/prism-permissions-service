@@ -8,19 +8,20 @@ export type ConnectorFunction =
   | 'list_projects'
   | 'list_models'
   | 'list_versions'
+  /** @deprecated Never grantable — connector hard-denies project creation. Kept for reading legacy rows. */
   | 'create_project'
   | 'create_model'
   | 'create_version'
   | 'use_library'
   | 'use_infile';
 
+/** Grantable connector functions (excludes create_project — connector never creates projects). */
 export const CONNECTOR_FUNCTIONS: ConnectorFunction[] = [
   'send',
   'receive',
   'list_projects',
   'list_models',
   'list_versions',
-  'create_project',
   'create_model',
   'create_version',
   'use_library',
@@ -106,8 +107,9 @@ export interface AccessSessionRequest {
 /**
  * Default invite-key function preset (send-only / "Light-like" UX).
  * Admins may grant any {@link CONNECTOR_FUNCTIONS} value, including `receive`,
- * `use_library`, `use_infile`, and `create_project`. Empty input falls back to
- * this set.
+ * `use_library`, and `use_infile`. Empty input falls back to this set.
+ * `list_projects` is included so guests can see their assigned projects.
+ * `create_project` is never grantable.
  */
 export const LIGHT_CONNECTOR_FUNCTIONS: ConnectorFunction[] = [
   'send',
@@ -115,6 +117,7 @@ export const LIGHT_CONNECTOR_FUNCTIONS: ConnectorFunction[] = [
   'create_version',
   'list_models',
   'list_versions',
+  'list_projects',
 ];
 
 /**

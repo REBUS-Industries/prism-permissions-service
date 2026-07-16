@@ -42,12 +42,13 @@ When `allowedFunctions` is omitted on create, the key gets:
 
 | Default allow |
 |---------------|
-| `send`, `create_model`, `create_version`, `list_models`, `list_versions` |
+| `send`, `create_model`, `create_version`, `list_models`, `list_versions`, `list_projects` |
 
-Admins may grant **any** `ConnectorFunction`, including `receive`,
-`use_library`, `use_infile`, `create_project`, and `list_projects`. A send-only
-invite yields a Lite-like UX in the single connector binary. Grant panel
-surfaces independently — Library / In File are **not** implied by `receive`.
+Admins may grant any grantable `ConnectorFunction`, including `receive`,
+`use_library`, `use_infile`, and `list_projects`. `create_project` is never
+grantable — the REBUS Connector hard-denies project creation for every session.
+A send-only invite yields a Lite-like UX in the single connector binary.
+Library / In File require explicit grants (not implied by `receive`).
 Connector **Refresh panel** re-fetches the invite manifest so grant changes
 apply without signing out.
 
@@ -59,6 +60,7 @@ apply without signing out.
 |-----------------|--------------|
 | `canSend` | `Allows("send")` |
 | `canReceive` | `Allows("receive")` |
+| `canListProjects` | `Allows("list_projects")` |
 | `canUseLibrary` | `Allows("use_library")` |
 | `canUseInFile` | `Allows("use_infile")` |
 | `canOpenOrbitLinks` | `authMethod != "invite_key"` |
