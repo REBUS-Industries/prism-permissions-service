@@ -85,7 +85,7 @@ Client hide/show is UX only. Orbit token ACL remains the real enforcement.
 }
 ```
 
-Response (plaintext `key` shown **once**):
+Response (plaintext `key` is also sealed at rest for later admin reveal):
 
 ```json
 {
@@ -101,6 +101,16 @@ Response (plaintext `key` shown **once**):
   "selectedModelIds": ["model-abc", "model-def"]
 }
 ```
+
+### `GET /api/access/invite-keys/:id/reveal`
+
+Returns `{ id, key, redeemUrl, recoverable }` for an active key. Keys created
+before ciphertext storage return **409** — use rotate instead.
+
+### `POST /api/access/invite-keys/:id/rotate`
+
+Issues a new plaintext (updates hash + sealed ciphertext). Collaborators must
+use the new key string.
 
 ### `PATCH /api/access/invite-keys/:id`
 

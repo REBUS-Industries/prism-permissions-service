@@ -13,6 +13,7 @@ import {
   type UpdateInviteKeyRequest,
 } from '../contracts/portal-access.js';
 import { hashApiKey } from '../auth/apiKey.js';
+import { openSecret, sealSecret } from '../crypto/secretBox.js';
 import { getDb } from '../db/client.js';
 import { accessSession, inviteKey, inviteKeyRedemption, mintedToken } from '../db/schema.js';
 import { AccessError } from './errors.js';
@@ -66,6 +67,18 @@ export function normalizeModelAccess(
 function generateInviteKeyPlaintext(): string {
   // URL-safe, high entropy; prefix makes logs/UI recognizable.
   return `invite_${randomBytes(24).toString('base64url')}`;
+}
+
+function buildRedeemUrl(publicBaseUrl: string, plaintext: string): string {
+  return `${publicBaseUrl.replace(/\/$/, '')}/api/access/invite-login?key=${encodeURIComponent(plaintext)}`;
+}
+
+export interface RevealInviteKeyResponse {
+  id: string;
+  key: string;
+  redeemUrl: string;
+  /** True when plaintext was recovered from sealed storage (or known demo key). */
+  recoverable: boolean;
 }
 
 function toRecord(row: typeof inviteKey.$inferSelect, extras?: { key?: string; redeemUrl?: string }): InviteKeyRecord {
@@ -142,6 +155,15 @@ export async function createInviteKey(
   const plaintext = generateInviteKeyPlaintext();
   const keyHash = hashApiKey(plaintext);
   const keyPrefix = plaintext.slice(0, 8);
+  let keyCiphertext: string;
+  try {
+    keyCiphertext = sealSecret(plaintext);
+  } catch (err) {
+    throw new AccessError(
+      err instanceof Error ? err.message : 'Failed to seal invite key',
+      503,
+    );
+  }
   const now = new Date();
   const db = getDb();
 
@@ -149,6 +171,7 @@ export async function createInviteKey(
     id,
     keyHash,
     keyPrefix,
+    keyCiphertext,
     label: input.label?.trim() || null,
     orbitTarget,
     orbitProjectIds: projectIds,
@@ -163,7 +186,7 @@ export async function createInviteKey(
     createdAt: now,
   });
 
-  const redeemUrl = `${publicBaseUrl.replace(/\/$/, '')}/api/access/invite-login?key=${encodeURIComponent(plaintext)}`;
+  const redeemUrl = buildRedeemUrl(publicBaseUrl, plaintext);
   return {
     id,
     key: plaintext,
@@ -301,6 +324,108 @@ export async function revokeInviteKey(id: string): Promise<InviteKeyRecord> {
   }
 
   return toRecord({ ...row, revokedAt: now });
+}
+
+/**
+ * Reveal the invite-key plaintext for an admin (after create / later).
+ * Keys minted before ciphertext storage cannot be recovered — use
+ * {@link rotateInviteKey} to issue a new plaintext.
+ */
+export async function revealInviteKey(
+  id: string,
+  publicBaseUrl: string,
+): Promise<RevealInviteKeyResponse> {
+  const db = getDb();
+  const rows = await db.select().from(inviteKey).where(eq(inviteKey.id, id)).limit(1);
+  const row = rows[0];
+  if (!row) throw new AccessError('Invite key not found', 404);
+  if (row.revokedAt) throw new AccessError('Invite key has been revoked', 400);
+
+  // Seeded demo key — plaintext is public in docs / mock adapter.
+  if (row.id === DEMO_INVITE_KEY_ID) {
+    return {
+      id: row.id,
+      key: DEMO_INVITE_KEY,
+      redeemUrl: buildRedeemUrl(publicBaseUrl, DEMO_INVITE_KEY),
+      recoverable: true,
+    };
+  }
+
+  const sealed = row.keyCiphertext?.trim();
+  if (!sealed) {
+    throw new AccessError(
+      'Invite key plaintext is not recoverable (created before reveal storage). Rotate the key to issue a new plaintext.',
+      409,
+    );
+  }
+
+  let plaintext: string;
+  try {
+    plaintext = openSecret(sealed);
+  } catch {
+    throw new AccessError(
+      'Failed to decrypt invite key. Check SESSION_SECRET matches the value used when the key was created, or rotate the key.',
+      503,
+    );
+  }
+
+  // Integrity: sealed value must still match the stored hash.
+  if (hashApiKey(plaintext) !== row.keyHash) {
+    throw new AccessError('Invite key ciphertext does not match stored hash — rotate the key.', 409);
+  }
+
+  return {
+    id: row.id,
+    key: plaintext,
+    redeemUrl: buildRedeemUrl(publicBaseUrl, plaintext),
+    recoverable: true,
+  };
+}
+
+/**
+ * Replace the plaintext (and hash) for an invite key. Invalidates prior
+ * redemptions that used the old string; existing sessions are left intact
+ * until they expire or the key is revoked.
+ */
+export async function rotateInviteKey(
+  id: string,
+  publicBaseUrl: string,
+): Promise<RevealInviteKeyResponse> {
+  const db = getDb();
+  const rows = await db.select().from(inviteKey).where(eq(inviteKey.id, id)).limit(1);
+  const row = rows[0];
+  if (!row) throw new AccessError('Invite key not found', 404);
+  if (row.revokedAt) throw new AccessError('Revoked invite keys cannot be rotated', 400);
+  if (row.id === DEMO_INVITE_KEY_ID) {
+    throw new AccessError('Demo invite key cannot be rotated', 400);
+  }
+
+  const plaintext = generateInviteKeyPlaintext();
+  let keyCiphertext: string;
+  try {
+    keyCiphertext = sealSecret(plaintext);
+  } catch (err) {
+    throw new AccessError(
+      err instanceof Error ? err.message : 'Failed to seal invite key',
+      503,
+    );
+  }
+
+  await db
+    .update(inviteKey)
+    .set({
+      keyHash: hashApiKey(plaintext),
+      keyPrefix: plaintext.slice(0, 8),
+      keyCiphertext,
+    })
+    .where(eq(inviteKey.id, id));
+
+  return {
+    id,
+    key: plaintext,
+    redeemUrl: buildRedeemUrl(publicBaseUrl, plaintext),
+    recoverable: true,
+  };
 }
 
 export type RedeemableInviteKey = {
