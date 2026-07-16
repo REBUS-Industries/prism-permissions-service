@@ -210,7 +210,7 @@ async function copy(text: string) {
               {{ fn }}
             </label>
           </div>
-          <p class="muted small">Light keys cannot grant <code>receive</code> or <code>create_project</code>.</p>
+          <p class="muted small">Default is the send-only (Light) preset. Grant <code>receive</code> to unlock Receive / Library / In File in the connector.</p>
         </div>
 
         <p v-if="model.meta.inviteKeyId" class="muted small">

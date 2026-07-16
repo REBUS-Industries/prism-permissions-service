@@ -99,7 +99,11 @@ export interface AccessSessionRequest {
   redirectUri?: string;
 }
 
-/** Default REBUS Connector Light function set for invite keys. */
+/**
+ * Default invite-key function preset (send-only / "Light-like" UX).
+ * Admins may grant any {@link CONNECTOR_FUNCTIONS} value, including `receive`
+ * and `create_project`. Empty input falls back to this set.
+ */
 export const LIGHT_CONNECTOR_FUNCTIONS: ConnectorFunction[] = [
   'send',
   'create_model',
@@ -108,11 +112,11 @@ export const LIGHT_CONNECTOR_FUNCTIONS: ConnectorFunction[] = [
   'list_versions',
 ];
 
-/** Functions that invite keys must never grant. */
-export const INVITE_KEY_DENIED_FUNCTIONS: ConnectorFunction[] = [
-  'receive',
-  'create_project',
-];
+/**
+ * @deprecated Invite keys may now grant any connector function. Kept as an
+ * empty list for back-compat imports; do not add denials here.
+ */
+export const INVITE_KEY_DENIED_FUNCTIONS: ConnectorFunction[] = [];
 
 export type InviteKeyAuthMethod = 'portal' | 'invite_key';
 
@@ -138,7 +142,7 @@ export interface InviteKeyProject {
 
 export interface CreateInviteKeyRequest {
   orbitProjectIds: string[];
-  /** Defaults to LIGHT_CONNECTOR_FUNCTIONS. Must not include receive/create_project. */
+  /** Defaults to LIGHT_CONNECTOR_FUNCTIONS. May include any ConnectorFunction. */
   allowedFunctions?: ConnectorFunction[];
   orbitTarget?: 'prod' | 'dev';
   expiresAt?: string | null;

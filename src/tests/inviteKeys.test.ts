@@ -19,14 +19,15 @@ test('normalizeInviteFunctions defaults to Light set', () => {
   assert.deepEqual(normalizeInviteFunctions([]), [...LIGHT_CONNECTOR_FUNCTIONS]);
 });
 
-test('normalizeInviteFunctions rejects receive and create_project', () => {
+test('normalizeInviteFunctions accepts receive and create_project', () => {
+  assert.deepEqual(normalizeInviteFunctions(['send', 'receive']), ['send', 'receive']);
+  assert.deepEqual(normalizeInviteFunctions(['create_project']), ['create_project']);
+});
+
+test('normalizeInviteFunctions rejects unknown functions', () => {
   assert.throws(
-    () => normalizeInviteFunctions(['send', 'receive']),
-    (err: unknown) => err instanceof AccessError && /receive/.test((err as Error).message),
-  );
-  assert.throws(
-    () => normalizeInviteFunctions(['create_project']),
-    (err: unknown) => err instanceof AccessError && /create_project/.test((err as Error).message),
+    () => normalizeInviteFunctions(['send', 'not_a_function' as 'send']),
+    (err: unknown) => err instanceof AccessError && /Unknown connector function/.test((err as Error).message),
   );
 });
 
@@ -43,8 +44,8 @@ test('extractInviteKeyFromSessionRequest prefers inviteKey field', () => {
   assert.equal(extractInviteKeyFromSessionRequest({}), null);
 });
 
-test('invite-key style manifest never blankets and excludes receive', () => {
-  const allowed = ['send', 'create_model', 'create_version', 'list_models'] as const;
+test('invite-key style manifest never blankets; grants follow allowedFunctions', () => {
+  const allowed = ['send', 'create_model', 'create_version', 'list_models', 'receive'] as const;
   const manifest = {
     schema: CONNECTOR_MANIFEST_SCHEMA,
     userId: 'invite:demo',
@@ -72,7 +73,7 @@ test('invite-key style manifest never blankets and excludes receive', () => {
   const fns = collectEffectiveFunctions(manifest);
   assert.ok(fns.includes('send'));
   assert.ok(fns.includes('create_model'));
-  assert.ok(!fns.includes('receive'));
+  assert.ok(fns.includes('receive'));
   assert.ok(!fns.includes('create_project'));
   assert.deepEqual(
     manifest.projects.map((p) => p.orbitProjectId),
