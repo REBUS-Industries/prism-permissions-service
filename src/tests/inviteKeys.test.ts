@@ -19,9 +19,14 @@ test('normalizeInviteFunctions defaults to Light set', () => {
   assert.deepEqual(normalizeInviteFunctions([]), [...LIGHT_CONNECTOR_FUNCTIONS]);
 });
 
-test('normalizeInviteFunctions accepts receive and create_project', () => {
+test('normalizeInviteFunctions accepts receive and strips create_project', () => {
   assert.deepEqual(normalizeInviteFunctions(['send', 'receive']), ['send', 'receive']);
-  assert.deepEqual(normalizeInviteFunctions(['create_project']), ['create_project']);
+  assert.deepEqual(normalizeInviteFunctions(['send', 'create_project']), ['send']);
+  assert.throws(
+    () => normalizeInviteFunctions(['create_project']),
+    (err: unknown) =>
+      err instanceof AccessError && /at least one function/.test((err as Error).message),
+  );
 });
 
 test('normalizeInviteFunctions rejects unknown functions', () => {

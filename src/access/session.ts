@@ -194,7 +194,7 @@ function graphFunctionsForProjects(projects: PortalProjectPermission[]) {
   return projects.flatMap((p) => {
     const levelFns =
       p.level === 'owner' || p.level === 'admin'
-        ? ['send', 'receive', 'list_projects', 'list_models', 'list_versions', 'create_project', 'create_model', 'create_version']
+        ? ['send', 'receive', 'list_projects', 'list_models', 'list_versions', 'create_model', 'create_version']
         : p.level === 'contributor'
           ? ['send', 'receive', 'list_projects', 'list_models', 'list_versions', 'create_version']
           : ['list_projects', 'list_models', 'list_versions', 'receive'];
