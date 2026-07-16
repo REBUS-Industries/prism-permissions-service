@@ -41,6 +41,9 @@ const FUNCTION_SCOPES: Record<ConnectorFunction, string[]> = {
   create_project: ['streams:write', 'users:read'],
   create_model: ['streams:write'],
   create_version: ['streams:write', 'objects:write'],
+  // Library / In File browse+place — same read scopes as receive.
+  use_library: ['streams:read', 'objects:read'],
+  use_infile: ['streams:read', 'objects:read'],
 };
 
 export function functionsToScopes(functions: ConnectorFunction[]): string[] {

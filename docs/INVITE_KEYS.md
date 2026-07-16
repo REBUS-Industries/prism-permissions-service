@@ -45,9 +45,10 @@ When `allowedFunctions` is omitted on create, the key gets:
 | `send`, `create_model`, `create_version`, `list_models`, `list_versions` |
 
 Admins may grant **any** `ConnectorFunction`, including `receive`,
-`create_project`, and `list_projects`. A send-only invite yields a Lite-like
-UX in the single connector binary; adding `receive` unlocks Receive / Library /
-In File without reinstall.
+`use_library`, `use_infile`, `create_project`, and `list_projects`. A send-only
+invite yields a Lite-like UX in the single connector binary. Grant panel
+surfaces independently — or use `receive` alone (still unlocks Library / In
+File for back-compat).
 
 `orbitBlanketAccess` is **always `false`** for invite-key sessions.
 
@@ -57,8 +58,8 @@ In File without reinstall.
 |-----------------|--------------|
 | `canSend` | `Allows("send")` |
 | `canReceive` | `Allows("receive")` |
-| `canUseLibrary` | same as `canReceive` |
-| `canUseInFile` | same as `canReceive` |
+| `canUseLibrary` | `Allows("use_library")` **or** `Allows("receive")` |
+| `canUseInFile` | `Allows("use_infile")` **or** `Allows("receive")` |
 | `canOpenOrbitLinks` | `authMethod != "invite_key"` |
 | Auth methods shown | portal + invite (invite-only users simply use invite) |
 
