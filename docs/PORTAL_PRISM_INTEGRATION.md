@@ -435,15 +435,23 @@ Canonical TypeScript types: `shared/contracts/portal-access.ts` in the [PRISM mo
 
 ---
 
-## Appendix B: Collaborator invite keys (Connector Light)
+## Appendix B: Collaborator invite keys
 
-External Rhino users can authenticate with an **invite key** instead of Google/portal
-OAuth. See [INVITE_KEYS.md](./INVITE_KEYS.md) for the full contract.
+External connector users can authenticate with an **invite key** instead of
+Google/portal OAuth. See [INVITE_KEYS.md](./INVITE_KEYS.md) for the full
+contract.
+
+There is no separate Lite connector binary — UI edition is driven by
+`projects[].allowedFunctions` on the shared `ConnectorManifest`.
 
 Summary for portal/connector teams:
 
-- Admin: `POST/GET /api/access/invite-keys`, `POST /api/access/invite-keys/:id/revoke`
-- Connector: `POST /api/access/session` with `{ inviteKey }` (or `portalAuthCode: "invite:…"`)
-- Manifest always has `orbitBlanketAccess: false`, `authMethod: "invite_key"`, and
-  project-scoped Light functions (no `receive` / `create_project`)
+- Admin: `POST/GET /api/access/invite-keys`, `PATCH/revoke` — any
+  `ConnectorFunction` may be granted (default preset = Light/send-only)
+- Connector: `POST /api/access/session` with `{ inviteKey }` (or
+  `portalAuthCode: "invite:…"`)
+- Manifest always has `orbitBlanketAccess: false`, `authMethod: "invite_key"`,
+  and project-scoped `allowedFunctions` from the key
+- Function → UI: `receive` unlocks Receive/Library/In File; invite sessions
+  hide "Open in ORBIT" links (`canOpenOrbitLinks=false`)
 - Mock demo key: `invite_demo_light_mock-project-1` → `mock-project-1`

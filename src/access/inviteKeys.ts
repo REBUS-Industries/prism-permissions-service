@@ -2,7 +2,6 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import {
   CONNECTOR_FUNCTIONS,
-  INVITE_KEY_DENIED_FUNCTIONS,
   INVITE_MODEL_ACCESS_MODES,
   LIGHT_CONNECTOR_FUNCTIONS,
   type ConnectorFunction,
@@ -23,18 +22,20 @@ export const DEMO_INVITE_KEY = 'invite_demo_light_mock-project-1';
 export const DEMO_INVITE_KEY_ID = 'invite-demo-light';
 
 const ALLOWED_SET = new Set<string>(CONNECTOR_FUNCTIONS);
-const DENIED_SET = new Set<string>(INVITE_KEY_DENIED_FUNCTIONS);
 const MODEL_ACCESS_SET = new Set<string>(INVITE_MODEL_ACCESS_MODES);
 
+/**
+ * Normalize invite-key allowedFunctions.
+ * - Missing/empty → LIGHT_CONNECTOR_FUNCTIONS (send-only default).
+ * - Any {@link CONNECTOR_FUNCTIONS} value is accepted (including receive).
+ * - Unknown names → 400.
+ */
 export function normalizeInviteFunctions(raw?: ConnectorFunction[] | null): ConnectorFunction[] {
   const source = raw?.length ? raw : LIGHT_CONNECTOR_FUNCTIONS;
   const out: ConnectorFunction[] = [];
   for (const fn of source) {
     if (!ALLOWED_SET.has(fn)) {
       throw new AccessError(`Unknown connector function: ${fn}`, 400);
-    }
-    if (DENIED_SET.has(fn)) {
-      throw new AccessError(`Invite keys cannot grant function: ${fn}`, 400);
     }
     if (!out.includes(fn)) out.push(fn);
   }

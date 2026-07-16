@@ -1,9 +1,12 @@
-# Collaborator invite keys (Connector Light)
+# Collaborator invite keys
 
-Invite keys let an external **REBUS Connector Light** (Rhino) user authenticate
-without a portal/Google account. A key exchanges for the same
-`ConnectorManifest` shape as portal login, with **project-scoped** access and
-**upload-only** functions.
+Invite keys let an external **REBUS Connector** user authenticate without a
+portal/Google account. A key exchanges for the same `ConnectorManifest` shape
+as portal login, with **project-scoped** access and an admin-chosen
+`allowedFunctions` set.
+
+There is **no separate Lite/Light binary**. Connector edition (send-only vs
+send+receive UI) is driven entirely by the manifest ACL.
 
 Contract source of truth: `src/contracts/portal-access.ts`
 (`rebus/connector-manifest/v1`).
@@ -13,10 +16,10 @@ Contract source of truth: `src/contracts/portal-access.ts`
 ## Behaviour
 
 1. An Orbit/PRISM admin creates a key bound to one or more `orbitProjectId`s,
-   `allowedFunctions` (default Light set), optional label / expiry /
+   `allowedFunctions` (default Light/send-only set), optional label / expiry /
    `maxRedemptions`, and **model access** (`all` | `selected` | `authored`).
 2. Admin copies the plaintext key (or redeem URL) to the collaborator.
-3. Connector Light pastes the key → `POST /api/access/session` with
+3. Connector pastes the key → `POST /api/access/session` with
    `{ inviteKey }` → `{ manifest }`.
 4. No separate Orbit login user is required. Sessions are attributed as
    `invite:<keyId>` in identity / audit fields.
@@ -33,13 +36,33 @@ Orbit tokens remain **project**-scoped. Model filtering is enforced by the
 connector using manifest fields (`modelAccess`, `selectedModelIds`,
 `authoredProperty: "userId"`).
 
-### Light default functions
+### Default functions (Light / send-only preset)
 
-| Allow | Deny |
-|-------|------|
-| `send`, `create_model`, `create_version`, `list_models`, `list_versions` | `receive`, `create_project` |
+When `allowedFunctions` is omitted on create, the key gets:
+
+| Default allow |
+|---------------|
+| `send`, `create_model`, `create_version`, `list_models`, `list_versions` |
+
+Admins may grant **any** `ConnectorFunction`, including `receive`,
+`create_project`, and `list_projects`. A send-only invite yields a Lite-like
+UX in the single connector binary; adding `receive` unlocks Receive / Library /
+In File without reinstall.
 
 `orbitBlanketAccess` is **always `false`** for invite-key sessions.
+
+### Function → connector UI mapping
+
+| Capability flag | Derived from |
+|-----------------|--------------|
+| `canSend` | `Allows("send")` |
+| `canReceive` | `Allows("receive")` |
+| `canUseLibrary` | same as `canReceive` |
+| `canUseInFile` | same as `canReceive` |
+| `canOpenOrbitLinks` | `authMethod != "invite_key"` |
+| Auth methods shown | portal + invite (invite-only users simply use invite) |
+
+Client hide/show is UX only. Orbit token ACL remains the real enforcement.
 
 ---
 
@@ -50,7 +73,7 @@ connector using manifest fields (`modelAccess`, `selectedModelIds`,
 ```json
 {
   "orbitProjectIds": ["mock-project-1"],
-  "allowedFunctions": ["send", "create_model", "create_version", "list_models"],
+  "allowedFunctions": ["send", "create_model", "create_version", "list_models", "receive"],
   "orbitTarget": "dev",
   "label": "Acme collaborator",
   "expiresAt": "2026-12-31T00:00:00.000Z",
@@ -70,7 +93,7 @@ Response (plaintext `key` shown **once**):
   "redeemUrl": "https://…/api/access/invite-login?key=invite_…",
   "expiresAt": null,
   "projects": [{ "orbitProjectId": "mock-project-1", "projectName": "Demo Project A" }],
-  "allowedFunctions": ["send", "create_model", "create_version", "list_models"],
+  "allowedFunctions": ["send", "create_model", "create_version", "list_models", "receive"],
   "label": "Acme collaborator",
   "maxRedemptions": 10,
   "modelAccess": "selected",
@@ -176,13 +199,13 @@ When `portal_adapter=mock` (prism-dev):
 
 ## Enforcement
 
-1. **Manifest** — client DenyIfNotAllowed is UX only; invite keys never set
-   `orbitBlanketAccess=true` and never include `receive` / `create_project`.
+1. **Manifest** — client DenyIfNotAllowed / capability UI is UX only; invite
+   keys never set `orbitBlanketAccess=true`. Grants are exactly the key's
+   `allowedFunctions` (fail closed when empty/missing for invite sessions).
 2. **Orbit token** — prefer `apiTokenCreate` with `limitResources` (needs
-   `tokens:write` on `ORBIT_MINT_TOKEN` / `ORBIT_ADMIN_TOKEN`). If minting is
-   unavailable, reuse PRISM's existing Orbit PAT — the same fallback portal
-   sessions already use. Manifest still lists only the key's projects and
-   Light functions for the connector.
+   `tokens:write` on `ORBIT_MINT_TOKEN` / `ORBIT_ADMIN_TOKEN`). Invite-key
+   mints set `forbidAdminFallback: true` — a failed scoped mint **must not**
+   fall back to a broad admin PAT.
 3. **Model access** — connector filters `list_models` / open using
    `modelAccess` / `selectedModelIds` / `authoredProperty` (`userId`).
 4. **Revocation** — key revoke marks sessions + minted tokens `revokedAt`.
@@ -193,10 +216,9 @@ When `portal_adapter=mock` (prism-dev):
 
 ## Admin UI (PRISM monorepo)
 
-Guest properties dialog should expose three radios (all / selected / authored)
-and a model selection tree when `selected`. Apply the scaffold under
-`docs/scaffolds/guest-model-access/` in the PRISM monorepo (this polyrepo
-cannot push there).
+Guest properties dialog exposes the full connector function set (Light preset
+pre-checked) plus three model-access radios (all / selected / authored) and a
+model selection tree when `selected`.
 
 ---
 

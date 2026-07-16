@@ -340,7 +340,9 @@ export async function exchangeInviteKeySession(body: AccessSessionRequest & { in
       projectIds,
       functions: key.allowedFunctions,
       sessionId,
-      forbidAdminFallback: false,
+      // Never fall back to a broad admin PAT for invite keys — Orbit ACL
+      // must match the key's scoped grant even when apiTokenCreate fails.
+      forbidAdminFallback: true,
     });
   } catch (err) {
     const raw = err instanceof Error ? err.message : 'unknown error';
