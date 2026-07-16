@@ -13,7 +13,9 @@ import {
   DEMO_INVITE_KEY,
   listInviteKeys,
   lookupRedeemableInviteKey,
+  revealInviteKey,
   revokeInviteKey,
+  rotateInviteKey,
   updateInviteKey,
 } from '../access/inviteKeys.js';
 import { resolvePortalUser } from '../access/portalUser.js';
@@ -278,6 +280,40 @@ export async function registerAccessRoutes(app: FastifyInstance, portal: PortalA
         }
         req.log.error(err);
         return reply.status(500).send({ error: 'Failed to revoke invite key' });
+      }
+    },
+  );
+
+  /** Reveal sealed plaintext for an existing invite key (admin cookie). */
+  app.get<{ Params: { id: string } }>(
+    '/api/access/invite-keys/:id/reveal',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      try {
+        return await revealInviteKey(req.params.id, publicBaseUrl(req));
+      } catch (err) {
+        if (err instanceof AccessError) {
+          return reply.status(err.status).send({ error: err.message });
+        }
+        req.log.error(err);
+        return reply.status(500).send({ error: 'Failed to reveal invite key' });
+      }
+    },
+  );
+
+  /** Issue a new plaintext when the old one is not recoverable. */
+  app.post<{ Params: { id: string } }>(
+    '/api/access/invite-keys/:id/rotate',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      try {
+        return await rotateInviteKey(req.params.id, publicBaseUrl(req));
+      } catch (err) {
+        if (err instanceof AccessError) {
+          return reply.status(err.status).send({ error: err.message });
+        }
+        req.log.error(err);
+        return reply.status(500).send({ error: 'Failed to rotate invite key' });
       }
     },
   );

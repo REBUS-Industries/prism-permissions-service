@@ -177,9 +177,9 @@ export interface InviteKeyRecord {
   createdAt: string;
   revokedAt?: string | null;
   lastRedeemedAt?: string | null;
-  /** Present only on create — plaintext key shown once. */
+  /** Plaintext key — present on create and on GET …/reveal (admin). */
   key?: string;
-  /** Present only on create. */
+  /** Redeem URL — present with plaintext key. */
   redeemUrl?: string;
 }
 

@@ -105,6 +105,8 @@ export const inviteKey = pgTable(
     id: text('id').primaryKey(),
     keyHash: text('key_hash').notNull(),
     keyPrefix: text('key_prefix').notNull(),
+    /** AES-GCM sealed plaintext (SESSION_SECRET) for admin reveal after create. */
+    keyCiphertext: text('key_ciphertext'),
     label: text('label'),
     orbitTarget: text('orbit_target').notNull(),
     orbitProjectIds: jsonb('orbit_project_ids').$type<string[]>().notNull(),
