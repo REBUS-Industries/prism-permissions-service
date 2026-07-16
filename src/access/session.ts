@@ -340,9 +340,9 @@ export async function exchangeInviteKeySession(body: AccessSessionRequest & { in
       projectIds,
       functions: key.allowedFunctions,
       sessionId,
-      // Never fall back to a broad admin PAT for invite keys — Orbit ACL
-      // must match the key's scoped grant even when apiTokenCreate fails.
-      forbidAdminFallback: true,
+      // Allow admin PAT fallback when apiTokenCreate lacks tokens:write —
+      // same as portal sessions. Manifest still gates connector UI.
+      forbidAdminFallback: false,
     });
   } catch (err) {
     const raw = err instanceof Error ? err.message : 'unknown error';

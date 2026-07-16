@@ -452,6 +452,7 @@ Summary for portal/connector teams:
   `portalAuthCode: "invite:…"`)
 - Manifest always has `orbitBlanketAccess: false`, `authMethod: "invite_key"`,
   and project-scoped `allowedFunctions` from the key
-- Function → UI: `receive` unlocks Receive/Library/In File; invite sessions
-  hide "Open in ORBIT" links (`canOpenOrbitLinks=false`)
+- Function → UI: `receive` → Receive; `use_library` / `use_infile` → Library /
+  In File (`receive` still unlocks both for back-compat); invite sessions hide
+  "Open in ORBIT" links (`canOpenOrbitLinks=false`)
 - Mock demo key: `invite_demo_light_mock-project-1` → `mock-project-1`

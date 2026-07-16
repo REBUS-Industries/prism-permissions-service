@@ -16,6 +16,11 @@ test('Light functions mint write scopes without requiring receive', () => {
   assert.ok(scopes.includes('streams:read'));
 });
 
+test('use_library / use_infile mint read scopes like receive', () => {
+  assert.deepEqual(functionsToScopes(['use_library']).sort(), ['objects:read', 'streams:read']);
+  assert.deepEqual(functionsToScopes(['use_infile']).sort(), ['objects:read', 'streams:read']);
+});
+
 /** Documents Orbit schema: apiTokenCreate returns String!, not { id token }. */
 test('apiTokenCreate response parsing accepts raw string token', () => {
   const parse = (created: string | { id?: string; token?: string } | null | undefined) =>
