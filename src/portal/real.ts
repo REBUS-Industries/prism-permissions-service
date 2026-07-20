@@ -1,5 +1,7 @@
 import {
   PORTAL_ACCESS_SCHEMA,
+  type PortalProjectPermission,
+  type PortalProjectPermissionsBulkResponse,
   type PortalProjectPermissionsResponse,
   type PortalRole,
   type PortalRolesResponse,
@@ -7,6 +9,25 @@ import {
 } from '../contracts/portal-access.js';
 import { getIntegrationSetting, getIntegrationSettingOr } from '../config/integrationSettings.js';
 import type { PortalAdapter, PortalAdapterConfig } from './adapter.js';
+
+function normaliseProjects(raw: unknown): PortalProjectPermission[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PortalProjectPermission[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue;
+    const orbitProjectId = String((row as { orbitProjectId?: unknown }).orbitProjectId ?? '').trim();
+    const level = String((row as { level?: unknown }).level ?? '').trim().toLowerCase();
+    if (!orbitProjectId) continue;
+    if (level !== 'viewer' && level !== 'contributor' && level !== 'owner' && level !== 'admin') continue;
+    const projectName = (row as { projectName?: unknown }).projectName;
+    out.push({
+      orbitProjectId,
+      level,
+      projectName: typeof projectName === 'string' ? projectName : null,
+    });
+  }
+  return out;
+}
 
 export class RealPortalAdapter implements PortalAdapter {
   constructor(private config: PortalAdapterConfig) {}
@@ -80,18 +101,67 @@ export class RealPortalAdapter implements PortalAdapter {
   }
 
   async getProjectPermissions(portalToken: string, userId: string): Promise<PortalProjectPermissionsResponse> {
+    // Prefer the user token when present; otherwise use the service API key
+    // (portal handoff: service-key auth on this route for Prism sync).
+    const authExtra = portalToken.trim()
+      ? { authorization: `Bearer ${portalToken}` }
+      : undefined;
     const res = await fetch(`${await this.baseUrl()}/portal/users/${encodeURIComponent(userId)}/project-permissions`, {
-      headers: await this.headers({ authorization: `Bearer ${portalToken}` }),
+      headers: await this.headers(authExtra),
     });
     if (!res.ok) {
       const detail = await res.text();
       throw new Error(`Portal project-permissions failed (${res.status}): ${detail}`);
     }
-    const body = (await res.json()) as { projects?: PortalProjectPermissionsResponse['projects'] };
+    const body = (await res.json()) as { projects?: unknown };
     return {
       schema: PORTAL_ACCESS_SCHEMA,
       userId,
-      projects: body.projects ?? [],
+      projects: normaliseProjects(body.projects),
+      supported: true,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  async listAllProjectPermissions(opts?: {
+    cursor?: string;
+    limit?: number;
+    domain?: string;
+  }): Promise<PortalProjectPermissionsBulkResponse> {
+    const params = new URLSearchParams();
+    if (opts?.cursor) params.set('cursor', opts.cursor);
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    if (opts?.domain) params.set('domain', opts.domain);
+    const qs = params.toString();
+    const url = `${await this.baseUrl()}/portal/project-permissions${qs ? `?${qs}` : ''}`;
+    const res = await fetch(url, { headers: await this.headers() });
+    if (res.status === 404 || res.status === 501) {
+      return {
+        users: [],
+        nextCursor: null,
+        supported: false,
+        fetchedAt: new Date().toISOString(),
+      };
+    }
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new Error(`Portal bulk project-permissions failed (${res.status}): ${detail}`);
+    }
+    const body = (await res.json()) as {
+      users?: Array<{ userId?: unknown; email?: unknown; projects?: unknown }>;
+      nextCursor?: string | null;
+    };
+    const users = (body.users ?? [])
+      .map((u) => ({
+        userId: String(u.userId ?? '').trim(),
+        email: String(u.email ?? '').trim().toLowerCase(),
+        projects: normaliseProjects(u.projects),
+      }))
+      .filter((u) => u.userId && u.email);
+    return {
+      users,
+      nextCursor: body.nextCursor ?? null,
+      supported: true,
       fetchedAt: new Date().toISOString(),
     };
   }

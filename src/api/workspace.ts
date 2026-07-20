@@ -1,18 +1,20 @@
 import type { FastifyInstance } from 'fastify';
 import type { ProvisionedUserInput } from '../contracts/portal-access.js';
 import { requireAdmin } from '../auth/adminSession.js';
+import type { PortalAdapter } from '../portal/adapter.js';
 import {
   createProvisionedUser,
   deleteProvisionedUser,
   getWorkspaceLink,
   linkGoogleWorkspace,
   listProvisionedUsers,
+  syncPortalProjectPermissions,
   syncWorkspaceDirectory,
   unlinkGoogleWorkspace,
   updateProvisionedUser,
 } from '../workspace/service.js';
 
-export async function registerWorkspaceRoutes(app: FastifyInstance) {
+export async function registerWorkspaceRoutes(app: FastifyInstance, portal: PortalAdapter) {
   await app.register(async (adminRoutes) => {
     adminRoutes.addHook('preHandler', requireAdmin);
 
@@ -45,6 +47,16 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
         return await syncWorkspaceDirectory();
       } catch (err) {
         return reply.status(400).send({ error: err instanceof Error ? err.message : 'Sync failed' });
+      }
+    });
+
+    adminRoutes.post('/api/permissions/workspace/sync-portal-projects', async (_req, reply) => {
+      try {
+        return await syncPortalProjectPermissions(portal);
+      } catch (err) {
+        return reply.status(400).send({
+          error: err instanceof Error ? err.message : 'Portal project sync failed',
+        });
       }
     });
 

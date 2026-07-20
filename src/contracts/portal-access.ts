@@ -91,6 +91,38 @@ export interface PortalProjectPermissionsResponse {
   userId: string;
   projects: PortalProjectPermission[];
   fetchedAt: string;
+  /**
+   * False when the adapter cannot supply portal memberships (e.g. direct Google
+   * OAuth). Callers should keep provisioned/manual projectPermissions in that case.
+   * Defaults to true for real/mock portal adapters.
+   */
+  supported?: boolean;
+}
+
+/** One user row from `GET /portal/project-permissions` (bulk pull). */
+export interface PortalProjectPermissionsUserRow {
+  userId: string;
+  email: string;
+  projects: PortalProjectPermission[];
+}
+
+/** Bulk membership feed — portal Option A from the project-membership sync handoff. */
+export interface PortalProjectPermissionsBulkResponse {
+  users: PortalProjectPermissionsUserRow[];
+  nextCursor: string | null;
+  /** False when the portal has not implemented the bulk endpoint. */
+  supported: boolean;
+  fetchedAt: string;
+}
+
+export interface PortalProjectPermissionsSyncResult {
+  supported: boolean;
+  updated: number;
+  unchanged: number;
+  /** Portal users with no matching provisioned_user email. */
+  unmatched: number;
+  /** Provisioned users cleared to [] because portal reported no memberships. */
+  cleared: number;
 }
 
 /**
@@ -328,6 +360,12 @@ export interface PortalAdapter {
   getMe(portalToken: string): Promise<PortalUser>;
   getProjectPermissions(portalToken: string, userId: string): Promise<PortalProjectPermissionsResponse>;
   listRoles(): Promise<PortalRolesResponse>;
+  /** Bulk pull of portal project memberships (service-key). */
+  listAllProjectPermissions(opts?: {
+    cursor?: string;
+    limit?: number;
+    domain?: string;
+  }): Promise<PortalProjectPermissionsBulkResponse>;
 }
 
 export type GoogleWorkspaceStatus = 'disconnected' | 'linked' | 'syncing';

@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import type {
   GoogleWorkspaceLink,
+  PortalAdapter,
   PortalProjectPermission,
+  PortalProjectPermissionsSyncResult,
   PortalUser,
   ProvisionedAdminCheck,
   ProvisionedUser,
@@ -14,6 +16,15 @@ import { googleWorkspace, provisionedUser } from '../db/schema.js';
 import { getIntegrationSetting, getIntegrationSettingOr } from '../config/integrationSettings.js';
 import { listMockWorkspaceDirectory } from './mockDirectory.js';
 import { listGoogleWorkspaceDirectory } from './googleDirectory.js';
+
+function projectsEqual(a: PortalProjectPermission[], b: PortalProjectPermission[]): boolean {
+  if (a.length !== b.length) return false;
+  const key = (p: PortalProjectPermission) =>
+    `${p.orbitProjectId}\0${p.level}\0${p.projectName ?? ''}`;
+  const left = [...a].map(key).sort();
+  const right = [...b].map(key).sort();
+  return left.every((v, i) => v === right[i]);
+}
 
 const WORKSPACE_ROW_ID = 'default';
 
@@ -298,9 +309,11 @@ function enforceProvisionedOnly(): Promise<boolean> {
 export async function resolveProvisionedAccess(
   portalUser: PortalUser,
   portalProjects: PortalProjectPermission[],
+  opts?: { portalMembershipsSupported?: boolean },
 ): Promise<ResolvedProvisionedAccess> {
   const workspace = await getWorkspaceLink();
   const provisioned = await findProvisionedUserByEmail(portalUser.email);
+  const portalMembershipsSupported = opts?.portalMembershipsSupported !== false;
 
   if (workspace && (await enforceProvisionedOnly())) {
     if (!provisioned) {
@@ -324,10 +337,12 @@ export async function resolveProvisionedAccess(
   }
 
   if (provisioned) {
+    // Portal memberships are source of truth when the adapter supports them
+    // (real/mock). Direct Google OAuth keeps manual provisioned assignments.
     return {
       blocked: false,
       provisioned,
-      projects: provisioned.projectPermissions,
+      projects: portalMembershipsSupported ? portalProjects : provisioned.projectPermissions,
       roleRefs: provisioned.roleRefs,
     };
   }
@@ -340,22 +355,93 @@ export async function resolveProvisionedAccess(
   };
 }
 
-export async function recordProvisionedLogin(portalUser: PortalUser): Promise<void> {
+export async function recordProvisionedLogin(
+  portalUser: PortalUser,
+  opts?: {
+    portalProjects?: PortalProjectPermission[];
+    portalMembershipsSupported?: boolean;
+  },
+): Promise<void> {
   const provisioned = await findProvisionedUserByEmail(portalUser.email);
   if (!provisioned) return;
 
   const db = getDb();
   const now = new Date();
+  const patch: Record<string, unknown> = {
+    googleSub: portalUser.googleSub ?? provisioned.googleSub ?? null,
+    displayName: portalUser.displayName ?? provisioned.displayName ?? null,
+    status: provisioned.status === 'pending' ? 'active' : provisioned.status,
+    lastLoginAt: now,
+    updatedAt: now,
+  };
+  if (opts?.portalMembershipsSupported !== false && opts?.portalProjects) {
+    patch.projectPermissions = opts.portalProjects;
+  }
   await db
     .update(provisionedUser)
-    .set({
-      googleSub: portalUser.googleSub ?? provisioned.googleSub ?? null,
-      displayName: portalUser.displayName ?? provisioned.displayName ?? null,
-      status: provisioned.status === 'pending' ? 'active' : provisioned.status,
-      lastLoginAt: now,
-      updatedAt: now,
-    })
+    .set(patch)
     .where(eq(provisionedUser.id, provisioned.id));
+}
+
+/**
+ * Pull portal project memberships (bulk feed) and write them onto matching
+ * provisioned users by email (full replace per user).
+ */
+export async function syncPortalProjectPermissions(
+  portal: PortalAdapter,
+): Promise<PortalProjectPermissionsSyncResult> {
+  const domain = (await getIntegrationSetting('workspace_domain'))?.trim().toLowerCase() || undefined;
+  let cursor: string | undefined;
+  const byEmail = new Map<string, PortalProjectPermission[]>();
+  let supported = true;
+
+  for (let page = 0; page < 100; page += 1) {
+    const batch = await portal.listAllProjectPermissions({
+      cursor,
+      limit: 200,
+      domain,
+    });
+    if (!batch.supported) {
+      supported = false;
+      break;
+    }
+    for (const row of batch.users) {
+      byEmail.set(row.email.trim().toLowerCase(), row.projects);
+    }
+    if (!batch.nextCursor) break;
+    cursor = batch.nextCursor;
+  }
+
+  if (!supported) {
+    return { supported: false, updated: 0, unchanged: 0, unmatched: 0, cleared: 0 };
+  }
+
+  const provisioned = await listProvisionedUsers();
+  const provisionedByEmail = new Map(provisioned.map((u) => [u.email.toLowerCase(), u]));
+  let updated = 0;
+  let unchanged = 0;
+  let cleared = 0;
+  let unmatched = 0;
+
+  for (const [email, projects] of byEmail) {
+    const user = provisionedByEmail.get(email);
+    if (!user) {
+      unmatched += 1;
+      continue;
+    }
+    if (projectsEqual(user.projectPermissions, projects)) {
+      unchanged += 1;
+      continue;
+    }
+    await updateProvisionedUser(user.id, { projectPermissions: projects });
+    updated += 1;
+    if (projects.length === 0) cleared += 1;
+  }
+
+  // Users in Prism but absent from the portal feed keep existing rows —
+  // the bulk endpoint may be domain-filtered. Login-time sync still refreshes them.
+
+  return { supported: true, updated, unchanged, unmatched, cleared };
 }
 
 export async function checkProvisionedAdmin(email: string): Promise<ProvisionedAdminCheck> {

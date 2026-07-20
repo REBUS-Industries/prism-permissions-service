@@ -1,5 +1,6 @@
 import type {
   PortalProjectPermission,
+  PortalProjectPermissionsBulkResponse,
   PortalProjectPermissionsResponse,
   PortalRolesResponse,
   PortalUser,
@@ -14,6 +15,12 @@ export interface PortalAdapter {
   getProjectPermissions(portalToken: string, userId: string): Promise<PortalProjectPermissionsResponse>;
   /** List the portal's current roles (service-to-portal call; no user token). */
   listRoles(): Promise<PortalRolesResponse>;
+  /** Bulk pull of portal project memberships (service-key). */
+  listAllProjectPermissions(opts?: {
+    cursor?: string;
+    limit?: number;
+    domain?: string;
+  }): Promise<PortalProjectPermissionsBulkResponse>;
 }
 
 export interface PortalAdapterConfig {
@@ -61,6 +68,11 @@ export class CachedPortalAdapter implements PortalAdapter {
     const value = await this.inner.listRoles();
     this.rolesCache = { value, expiresAt: Date.now() + rolesTtl };
     return value;
+  }
+
+  listAllProjectPermissions(opts?: { cursor?: string; limit?: number; domain?: string }) {
+    // No cache — admin sync should always hit the portal.
+    return this.inner.listAllProjectPermissions(opts);
   }
 }
 

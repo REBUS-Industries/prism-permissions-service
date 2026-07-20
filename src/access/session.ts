@@ -420,12 +420,18 @@ export async function exchangePortalSession(
 
   const portalUser = await portal.getMe(portalToken);
   const permissions = await portal.getProjectPermissions(portalToken, portalUser.userId);
-  const access = await resolveProvisionedAccess(portalUser, permissions.projects);
+  const portalMembershipsSupported = permissions.supported !== false;
+  const access = await resolveProvisionedAccess(portalUser, permissions.projects, {
+    portalMembershipsSupported,
+  });
   if (access.blocked) {
     throw new AccessError(access.reason ?? 'Access denied', 403);
   }
 
-  await recordProvisionedLogin(portalUser);
+  await recordProvisionedLogin(portalUser, {
+    portalProjects: permissions.projects,
+    portalMembershipsSupported,
+  });
   const effectiveProjects = access.projects;
   const roleRefs = access.roleRefs;
   const blanket = await useBlanketOrbitAccess(effectiveProjects);

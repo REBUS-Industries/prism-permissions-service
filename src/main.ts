@@ -48,7 +48,7 @@ async function buildApp() {
 
   await registerAccessRoutes(app, portal);
   await registerPermissionsRoutes(app, portal);
-  await registerWorkspaceRoutes(app);
+  await registerWorkspaceRoutes(app, portal);
 
   return app;
 }
