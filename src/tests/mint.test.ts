@@ -21,6 +21,10 @@ test('use_library / use_infile mint read scopes like receive', () => {
   assert.deepEqual(functionsToScopes(['use_infile']).sort(), ['objects:read', 'streams:read']);
 });
 
+test('use_file_library mints no Orbit scopes (Prism /api/files)', () => {
+  assert.deepEqual(functionsToScopes(['use_file_library']), []);
+});
+
 /** Documents Orbit schema: apiTokenCreate returns String!, not { id token }. */
 test('apiTokenCreate response parsing accepts raw string token', () => {
   const parse = (created: string | { id?: string; token?: string } | null | undefined) =>

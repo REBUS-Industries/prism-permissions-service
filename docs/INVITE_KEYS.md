@@ -45,12 +45,12 @@ When `allowedFunctions` is omitted on create, the key gets:
 | `send`, `create_model`, `create_version`, `list_models`, `list_versions`, `list_projects` |
 
 Admins may grant any grantable `ConnectorFunction`, including `receive`,
-`use_library`, `use_infile`, and `list_projects`. `create_project` is never
-grantable — the REBUS Connector hard-denies project creation for every session.
-A send-only invite yields a Lite-like UX in the single connector binary.
-Library / In File require explicit grants (not implied by `receive`).
-Connector **Refresh panel** re-fetches the invite manifest so grant changes
-apply without signing out.
+`use_library`, `use_infile`, `use_file_library`, and `list_projects`.
+`create_project` is never grantable — the REBUS Connector hard-denies project
+creation for every session. A send-only invite yields a Lite-like UX in the
+single connector binary. Library / In File / Upload File require explicit grants
+(not implied by `receive` or `send`). Connector **Refresh panel** re-fetches the
+invite manifest so grant changes apply without signing out.
 
 `orbitBlanketAccess` is **always `false`** for invite-key sessions.
 
@@ -63,6 +63,7 @@ apply without signing out.
 | `canListProjects` | `Allows("list_projects")` |
 | `canUseLibrary` | `Allows("use_library")` |
 | `canUseInFile` | `Allows("use_infile")` |
+| `canUseFileLibrary` | `Allows("use_file_library")` |
 | `canOpenOrbitLinks` | `authMethod != "invite_key"` |
 | Auth methods shown | portal + Orbit OAuth + invite (no PAT) |
 

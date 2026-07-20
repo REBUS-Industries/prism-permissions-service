@@ -44,6 +44,9 @@ const FUNCTION_SCOPES: Record<ConnectorFunction, string[]> = {
   // Library / In File browse+place — same read scopes as receive.
   use_library: ['streams:read', 'objects:read'],
   use_infile: ['streams:read', 'objects:read'],
+  // Prism File Library upload uses Prism `/api/files` (Orbit bearer / API key),
+  // not Orbit stream scopes.
+  use_file_library: [],
 };
 
 export function functionsToScopes(functions: ConnectorFunction[]): string[] {
