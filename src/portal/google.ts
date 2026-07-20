@@ -1,6 +1,7 @@
 import { OAuth2Client } from 'google-auth-library';
 import {
   PORTAL_ACCESS_SCHEMA,
+  type PortalProjectPermissionsBulkResponse,
   type PortalProjectPermissionsResponse,
   type PortalRolesResponse,
   type PortalUser,
@@ -51,11 +52,21 @@ export class GooglePortalAdapter implements PortalAdapter {
   }
 
   async getProjectPermissions(_portalToken: string, userId: string): Promise<PortalProjectPermissionsResponse> {
-    // Project access comes from provisioned_user.projectPermissions (manual assignment).
+    // No REBUS portal — project access stays on provisioned_user.projectPermissions.
     return {
       schema: PORTAL_ACCESS_SCHEMA,
       userId,
       projects: [],
+      supported: false,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  async listAllProjectPermissions(): Promise<PortalProjectPermissionsBulkResponse> {
+    return {
+      users: [],
+      nextCursor: null,
+      supported: false,
       fetchedAt: new Date().toISOString(),
     };
   }

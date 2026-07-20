@@ -1,5 +1,6 @@
 import {
   PORTAL_ACCESS_SCHEMA,
+  type PortalProjectPermissionsBulkResponse,
   type PortalProjectPermissionsResponse,
   type PortalRolesResponse,
   type PortalUser,
@@ -69,10 +70,29 @@ export class MockPortalAdapter implements PortalAdapter {
         schema: PORTAL_ACCESS_SCHEMA,
         userId,
         projects: [],
+        supported: true,
         fetchedAt: new Date().toISOString(),
       };
     }
-    return { ...projects, fetchedAt: new Date().toISOString() };
+    return { ...projects, supported: true, fetchedAt: new Date().toISOString() };
+  }
+
+  async listAllProjectPermissions(_opts?: {
+    cursor?: string;
+    limit?: number;
+    domain?: string;
+  }): Promise<PortalProjectPermissionsBulkResponse> {
+    const users = Object.values(MOCK_USERS).map((u) => ({
+      userId: u.userId,
+      email: u.email.toLowerCase(),
+      projects: MOCK_PROJECTS[u.userId]?.projects ?? [],
+    }));
+    return {
+      users,
+      nextCursor: null,
+      supported: true,
+      fetchedAt: new Date().toISOString(),
+    };
   }
 
   async listRoles(): Promise<PortalRolesResponse> {
