@@ -12,7 +12,7 @@ import type {
   WorkspaceSyncResult,
 } from '../contracts/portal-access.js';
 import { getDb } from '../db/client.js';
-import { googleWorkspace, provisionedUser } from '../db/schema.js';
+import { googleWorkspace, identityLink, provisionedUser } from '../db/schema.js';
 import { getIntegrationSetting, getIntegrationSettingOr } from '../config/integrationSettings.js';
 import { listMockWorkspaceDirectory } from './mockDirectory.js';
 import { listGoogleWorkspaceDirectory } from './googleDirectory.js';
@@ -383,39 +383,9 @@ export async function recordProvisionedLogin(
     .where(eq(provisionedUser.id, provisioned.id));
 }
 
-/**
- * Pull portal project memberships (bulk feed) and write them onto matching
- * provisioned users by email (full replace per user).
- */
-export async function syncPortalProjectPermissions(
-  portal: PortalAdapter,
-): Promise<PortalProjectPermissionsSyncResult> {
-  const domain = (await getIntegrationSetting('workspace_domain'))?.trim().toLowerCase() || undefined;
-  let cursor: string | undefined;
-  const byEmail = new Map<string, PortalProjectPermission[]>();
-  let supported = true;
-
-  for (let page = 0; page < 100; page += 1) {
-    const batch = await portal.listAllProjectPermissions({
-      cursor,
-      limit: 200,
-      domain,
-    });
-    if (!batch.supported) {
-      supported = false;
-      break;
-    }
-    for (const row of batch.users) {
-      byEmail.set(row.email.trim().toLowerCase(), row.projects);
-    }
-    if (!batch.nextCursor) break;
-    cursor = batch.nextCursor;
-  }
-
-  if (!supported) {
-    return { supported: false, updated: 0, unchanged: 0, unmatched: 0, cleared: 0 };
-  }
-
+async function applyPortalProjectsByEmail(
+  byEmail: Map<string, PortalProjectPermission[]>,
+): Promise<{ updated: number; unchanged: number; unmatched: number; cleared: number }> {
   const provisioned = await listProvisionedUsers();
   const provisionedByEmail = new Map(provisioned.map((u) => [u.email.toLowerCase(), u]));
   let updated = 0;
@@ -438,10 +408,124 @@ export async function syncPortalProjectPermissions(
     if (projects.length === 0) cleared += 1;
   }
 
-  // Users in Prism but absent from the portal feed keep existing rows —
-  // the bulk endpoint may be domain-filtered. Login-time sync still refreshes them.
+  return { updated, unchanged, unmatched, cleared };
+}
 
-  return { supported: true, updated, unchanged, unmatched, cleared };
+/**
+ * Pull portal project memberships and write them onto matching provisioned
+ * users by email (full replace per user).
+ *
+ * Prefers bulk `GET /portal/project-permissions`. When that is missing (404/501),
+ * falls back to per-user `GET /portal/users/:id/project-permissions` with the
+ * service API key for every known `identity_link` (users who have logged in).
+ */
+export async function syncPortalProjectPermissions(
+  portal: PortalAdapter,
+): Promise<PortalProjectPermissionsSyncResult> {
+  const domain = (await getIntegrationSetting('workspace_domain'))?.trim().toLowerCase() || undefined;
+  let cursor: string | undefined;
+  const byEmail = new Map<string, PortalProjectPermission[]>();
+  let bulkSupported = true;
+
+  for (let page = 0; page < 100; page += 1) {
+    const batch = await portal.listAllProjectPermissions({
+      cursor,
+      limit: 200,
+      domain,
+    });
+    if (!batch.supported) {
+      bulkSupported = false;
+      break;
+    }
+    for (const row of batch.users) {
+      byEmail.set(row.email.trim().toLowerCase(), row.projects);
+    }
+    if (!batch.nextCursor) break;
+    cursor = batch.nextCursor;
+  }
+
+  if (bulkSupported) {
+    const applied = await applyPortalProjectsByEmail(byEmail);
+    return { supported: true, mode: 'bulk', ...applied };
+  }
+
+  // Fallback: per-user fetch via service key for identities we already know.
+  const db = getDb();
+  const links = await db.select().from(identityLink);
+  if (links.length === 0) {
+    return {
+      supported: false,
+      mode: 'unavailable',
+      updated: 0,
+      unchanged: 0,
+      unmatched: 0,
+      cleared: 0,
+      skipped: 0,
+      failed: 0,
+    };
+  }
+
+  const provisioned = await listProvisionedUsers();
+  const provisionedByEmail = new Map(provisioned.map((u) => [u.email.toLowerCase(), u]));
+  let updated = 0;
+  let unchanged = 0;
+  let cleared = 0;
+  let unmatched = 0;
+  let skipped = 0;
+  let failed = 0;
+  let anySuccess = false;
+
+  for (const link of links) {
+    const email = link.email.trim().toLowerCase();
+    if (domain && !email.endsWith(`@${domain}`)) continue;
+    const user = provisionedByEmail.get(email);
+    if (!user) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      // Empty token → RealPortalAdapter uses portal_api_key (service auth).
+      const perms = await portal.getProjectPermissions('', link.portalUserId);
+      if (perms.supported === false) {
+        failed += 1;
+        continue;
+      }
+      anySuccess = true;
+      if (projectsEqual(user.projectPermissions, perms.projects)) {
+        unchanged += 1;
+        continue;
+      }
+      await updateProvisionedUser(user.id, { projectPermissions: perms.projects });
+      updated += 1;
+      if (perms.projects.length === 0) cleared += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+
+  if (!anySuccess) {
+    return {
+      supported: false,
+      mode: 'unavailable',
+      updated: 0,
+      unchanged: 0,
+      unmatched,
+      cleared: 0,
+      skipped,
+      failed,
+    };
+  }
+
+  return {
+    supported: true,
+    mode: 'per-user',
+    updated,
+    unchanged,
+    unmatched,
+    cleared,
+    skipped,
+    failed,
+  };
 }
 
 export async function checkProvisionedAdmin(email: string): Promise<ProvisionedAdminCheck> {

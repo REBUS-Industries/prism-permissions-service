@@ -117,12 +117,18 @@ export interface PortalProjectPermissionsBulkResponse {
 
 export interface PortalProjectPermissionsSyncResult {
   supported: boolean;
+  /** How memberships were pulled from the portal. */
+  mode: 'bulk' | 'per-user' | 'unavailable';
   updated: number;
   unchanged: number;
   /** Portal users with no matching provisioned_user email. */
   unmatched: number;
   /** Provisioned users cleared to [] because portal reported no memberships. */
   cleared: number;
+  /** Per-user fallback: identity links with no matching provisioned user. */
+  skipped?: number;
+  /** Per-user fallback: fetches that failed (auth/404/etc). */
+  failed?: number;
 }
 
 /**
