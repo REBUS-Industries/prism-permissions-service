@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
   CONNECTOR_FUNCTIONS,
@@ -10,7 +9,6 @@ import {
   type ToolGrants,
   type ToolGrantsResponse,
 } from '../contracts/portal-access.js';
-import { requireAdmin } from '../auth/adminSession.js';
 import { requirePermissionsEditor } from '../auth/permissionsEditor.js';
 import { loadToolGrants, saveToolGrants } from '../access/tools.js';
 import { getDb } from '../db/client.js';
@@ -22,6 +20,13 @@ import {
 import { loadPolicyGraph } from '../access/manifest.js';
 import type { PortalAdapter } from '../portal/adapter.js';
 import type { PortalRolesResponse } from '../contracts/portal-access.js';
+
+const EMPTY_GRAPH_DEFAULTS: ConnectorFunction[] = [
+  'list_projects',
+  'list_models',
+  'list_versions',
+  'receive',
+];
 
 export async function registerPermissionsRoutes(app: FastifyInstance, portal: PortalAdapter) {
   app.get('/api/permissions/tool-grants', { preHandler: requirePermissionsEditor }, async (): Promise<ToolGrantsResponse> => {
@@ -60,32 +65,42 @@ export async function registerPermissionsRoutes(app: FastifyInstance, portal: Po
 
   app.get('/api/permissions/tools', async () => ({ tools: PRISM_TOOLS }));
 
-  await app.register(async (adminRoutes) => {
-    adminRoutes.addHook('preHandler', requireAdmin);
+  // Connector policy + function catalogue — same auth as tool-grants so Portal
+  // can edit default functions with an access:admin API key (admin SPA cookie
+  // still works).
+  app.get('/api/permissions/functions', { preHandler: requirePermissionsEditor }, async () => ({
+    functions: CONNECTOR_FUNCTIONS,
+  }));
 
-    adminRoutes.get('/api/permissions/policy', async (): Promise<PermissionsPolicyResponse> => {
-      const graph = await loadPolicyGraph();
-      return {
-        graph: {
-          nodes: graph.nodes,
-          edges: graph.edges,
-          updatedAt: new Date().toISOString(),
-        },
-        defaultFunctions: graph.defaultFunctions,
-      };
-    });
+  app.get('/api/permissions/policy', { preHandler: requirePermissionsEditor }, async (): Promise<PermissionsPolicyResponse> => {
+    const graph = await loadPolicyGraph();
+    return {
+      graph: {
+        nodes: graph.nodes,
+        edges: graph.edges,
+        updatedAt: new Date().toISOString(),
+      },
+      defaultFunctions: graph.defaultFunctions,
+    };
+  });
 
-    adminRoutes.put<{ Body: { graph?: FunctionPolicyGraph; defaultFunctions?: ConnectorFunction[] } }>(
-      '/api/permissions/policy',
-      async (req, reply) => {
-        const body = req.body ?? {};
-        const graph = body.graph;
-        if (!graph?.nodes || !graph.edges) {
-          return reply.status(400).send({ error: 'graph.nodes and graph.edges required' });
-        }
-        const db = getDb();
-        const now = new Date();
+  app.put<{ Body: { graph?: FunctionPolicyGraph; defaultFunctions?: ConnectorFunction[] } }>(
+    '/api/permissions/policy',
+    { preHandler: requirePermissionsEditor },
+    async (req, reply) => {
+      const body = req.body ?? {};
+      const graph = body.graph;
+      const hasGraph = Boolean(graph?.nodes && graph.edges);
+      const hasDefaults = Array.isArray(body.defaultFunctions);
 
+      if (!hasGraph && !hasDefaults) {
+        return reply.status(400).send({ error: 'graph or defaultFunctions required' });
+      }
+
+      const db = getDb();
+      const now = new Date();
+
+      if (hasGraph && graph) {
         await db.delete(functionPolicyEdges);
         await db.delete(functionPolicyNodes);
 
@@ -115,35 +130,39 @@ export async function registerPermissionsRoutes(app: FastifyInstance, portal: Po
             })),
           );
         }
+      }
 
-        const defaults = body.defaultFunctions ?? graph.nodes.length
-          ? undefined
-          : (['list_projects', 'list_models', 'list_versions', 'receive'] as ConnectorFunction[]);
+      // Persist defaults when provided. (Previously `??` / `?:` precedence
+      // dropped body.defaultFunctions whenever it was a non-empty array.)
+      // Portal edits defaults only; admin SPA may send graph + defaults.
+      let defaultsToSave: ConnectorFunction[] | undefined;
+      if (hasDefaults) {
+        defaultsToSave = body.defaultFunctions!.filter((fn) =>
+          (CONNECTOR_FUNCTIONS as readonly string[]).includes(fn),
+        );
+      } else if (hasGraph && graph && graph.nodes.length === 0) {
+        defaultsToSave = EMPTY_GRAPH_DEFAULTS;
+      }
 
-        if (defaults) {
-          await db
-            .insert(policySettings)
-            .values({ id: 'default', defaultFunctions: defaults, updatedAt: now })
-            .onConflictDoUpdate({
-              target: policySettings.id,
-              set: { defaultFunctions: defaults, updatedAt: now },
-            });
-        }
+      if (defaultsToSave) {
+        await db
+          .insert(policySettings)
+          .values({ id: 'default', defaultFunctions: defaultsToSave, updatedAt: now })
+          .onConflictDoUpdate({
+            target: policySettings.id,
+            set: { defaultFunctions: defaultsToSave, updatedAt: now },
+          });
+      }
 
-        const saved = await loadPolicyGraph();
-        return {
-          graph: {
-            nodes: saved.nodes,
-            edges: saved.edges,
-            updatedAt: now.toISOString(),
-          },
-          defaultFunctions: saved.defaultFunctions,
-        };
-      },
-    );
-
-    adminRoutes.get('/api/permissions/functions', async () => ({
-      functions: CONNECTOR_FUNCTIONS,
-    }));
-  });
+      const saved = await loadPolicyGraph();
+      return {
+        graph: {
+          nodes: saved.nodes,
+          edges: saved.edges,
+          updatedAt: now.toISOString(),
+        },
+        defaultFunctions: saved.defaultFunctions,
+      };
+    },
+  );
 }
