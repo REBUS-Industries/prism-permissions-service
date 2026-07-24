@@ -312,6 +312,28 @@ PRISM ops will provide an API key with `access:admin` scope for this call.
 
 ---
 
+## 7b. Connector default functions (portal → PRISM)
+
+The same `access:admin` API key can read/write connector policy defaults:
+
+```http
+GET https://prism.rebus.industries/api/permissions/functions
+GET https://prism.rebus.industries/api/permissions/policy
+PUT https://prism.rebus.industries/api/permissions/policy
+X-API-Key: prism_<key_with_access:admin_scope>
+Content-Type: application/json
+
+{
+  "defaultFunctions": ["send", "list_projects", "list_models", "list_versions", "create_model", "create_version"]
+}
+```
+
+`PUT` may send `defaultFunctions` alone (Portal defaults editor) or `graph` + optional
+`defaultFunctions` (full replace; PRISM admin graph editor). Auth matches
+tool-grants — admin SPA cookie **or** `access:admin` API key.
+
+---
+
 ## 8. Acceptance tests
 
 Run these in order. All must pass before declaring integration complete.

@@ -15,9 +15,10 @@ Portal-brokered access + node-based connector permissions for PRISM/ORBIT.
 | POST | `/api/access/portal-user` | — | Validate portal OAuth code → `{ user }` (admin Google login) |
 | GET | `/api/access/manifest?sessionId=` | — | Refresh manifest for session |
 | GET | `/api/access/mock-login` | — | Dev mock portal redirect (mock adapter only) |
-| GET | `/api/permissions/portal-roles` | admin cookie | Live portal role catalogue |
-| GET/PUT | `/api/permissions/policy` | admin cookie | Node graph CRUD |
-| GET/PUT | `/api/permissions/tool-grants` | admin cookie | Role-based PRISM tool grants |
+| GET | `/api/permissions/portal-roles` | admin cookie or `access:admin` API key | Live portal role catalogue |
+| GET | `/api/permissions/functions` | admin cookie or `access:admin` API key | Grantable connector functions |
+| GET/PUT | `/api/permissions/policy` | admin cookie or `access:admin` API key | Node graph + default functions |
+| GET/PUT | `/api/permissions/tool-grants` | admin cookie or `access:admin` API key | Role-based PRISM tool grants |
 | GET | `/api/permissions/workspace` | admin cookie | Workspace link + provisioned users |
 | POST | `/api/permissions/workspace/link` | admin cookie | Link Google Workspace domain |
 | POST | `/api/permissions/workspace/sync` | admin cookie | Import directory users |
