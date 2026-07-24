@@ -277,7 +277,7 @@ This drives ORBIT connector project access when PRISM is not in blanket-access m
 
 The portal is the **authoring surface** for which PRISM admin tools each role may use. PRISM stores grants keyed by **role id**.
 
-PRISM tools: `convert`, `visualiser`, `fixtures`, `materials`, `models`
+PRISM tools: `convert`, `visualiser`, `fixtures`, `materials`, `models`, `files`
 
 ### Request
 
@@ -289,7 +289,7 @@ Content-Type: application/json
 {
   "grants": {
     "roles": {
-      "super-admin": ["convert", "visualiser", "fixtures", "materials", "models"],
+      "super-admin": ["convert", "visualiser", "fixtures", "materials", "models", "files"],
       "staffnew":    ["convert", "visualiser"],
       "viewer":      []
     },
